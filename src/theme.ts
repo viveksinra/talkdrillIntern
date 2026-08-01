@@ -136,7 +136,7 @@ export function textGradient(gradient: string) {
 }
 
 /** Card hover language from the website's FeatureCard: lift + colored glow. */
-export function hoverLift(glowColor = brand.primary.main) {
+export function hoverLift(glowColor: string = brand.primary.main) {
   return {
     transition: 'transform .3s ease, box-shadow .3s ease, border-color .3s ease',
     '&:hover': {

@@ -12,6 +12,8 @@ export interface EmptyStateProps {
   description?: string;
   /** Defaults to an inbox glyph. Pass any MUI icon element. */
   icon?: React.ReactNode;
+  /** Clay illustration path (from the ART registry). Wins over `icon`. */
+  art?: string;
   /** Primary call to action (a Button, usually). */
   action?: React.ReactNode;
   /** Drops the card border — for use inside an existing Card. */
@@ -24,12 +26,22 @@ export default function EmptyState({
   title,
   description,
   icon,
+  art,
   action,
   bare = false,
   dense = false,
 }: EmptyStateProps) {
   const body = (
     <Stack spacing={1.25} alignItems="center" sx={{ textAlign: 'center', py: dense ? 2 : 4, px: 2 }}>
+      {art ? (
+        <Box
+          component="img"
+          src={art}
+          alt=""
+          aria-hidden
+          sx={{ width: dense ? 88 : 120, height: dense ? 88 : 120, objectFit: 'contain' }}
+        />
+      ) : (
       <Box
         sx={{
           width: 56,
@@ -44,6 +56,7 @@ export default function EmptyState({
       >
         {icon ?? <InboxIcon />}
       </Box>
+      )}
       <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
         {title}
       </Typography>
