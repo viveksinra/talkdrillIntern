@@ -140,22 +140,55 @@ export const ART = {
   },
 } as const;
 
-/** Best-effort clay art for a reward the admin uploaded no image for. */
+/**
+ * Best-effort clay art for a reward the admin uploaded no image for. Ordered
+ * most-specific first (lapel before mic, ring light before light). A catalog of
+ * merch should never render as a wall of identical gift boxes, so swag-ish
+ * names resolve to the goodies box and app perks to the phone before the
+ * generic fallback is reached.
+ */
 export function rewardFallbackArt(name: string, type?: string): string {
   const n = name.toLowerCase();
   if (n.includes('lapel') || n.includes('collar')) return ART.reward.lapelMic;
   if (n.includes('mic')) return ART.reward.mic;
-  if (n.includes('ring') || n.includes('light')) return ART.reward.ringLight;
+  if (n.includes('ring light') || n.includes('ringlight') || n.includes('light'))
+    return ART.reward.ringLight;
   if (n.includes('shirt') || n.includes('tee') || n.includes('hoodie')) return ART.reward.tshirt;
-  if (n.includes('phone')) return ART.reward.smartphone;
+  if (n.includes('headphone') || n.includes('earphone') || n.includes('earbud'))
+    return ART.reward.headphones;
   if (n.includes('voucher') || n.includes('gift card') || n.includes('coupon'))
     return ART.reward.voucher;
-  if (n.includes('headphone')) return ART.reward.headphones;
-  if (n.includes('stipend')) return ART.reward.stipend;
-  if (n.includes('certificate')) return ART.reward.certificate;
-  if (n.includes('trophy')) return ART.reward.trophy;
+  if (n.includes('stipend') || n.includes('payout')) return ART.reward.stipend;
+  if (n.includes('certificate') || n.includes('letter')) return ART.reward.certificate;
+  if (n.includes('trophy') || n.includes('award')) return ART.reward.trophy;
+  // Swag: stickers, mugs, bottles, kits — the goodies box, not a plain gift box.
+  if (
+    n.includes('sticker') ||
+    n.includes('mug') ||
+    n.includes('bottle') ||
+    n.includes('swag') ||
+    n.includes('kit') ||
+    n.includes('merch') ||
+    n.includes('goodie') ||
+    n.includes('notebook') ||
+    n.includes('diary') ||
+    n.includes('bag')
+  )
+    return ART.reward.goodies;
+  // App perks (Pro/Premium/subscription access) read best as the phone.
+  if (
+    n.includes('pro access') ||
+    n.includes('premium') ||
+    n.includes('subscription') ||
+    n.includes('membership') ||
+    n.includes('plan')
+  )
+    return ART.reward.smartphone;
+  if (n.includes('phone')) return ART.reward.smartphone;
+  if (n.includes('cash') || n.includes('₹') || n.includes('rupee')) return ART.reward.cash;
   if (type === 'cash') return ART.reward.cash;
   if (type === 'certificate') return ART.reward.certificate;
+  if (type === 'perk') return ART.reward.smartphone;
   return ART.reward.giftBox;
 }
 

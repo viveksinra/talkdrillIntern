@@ -26,6 +26,10 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
+  // Absolute base for OG/twitter image URLs (relative ones don't resolve for scrapers).
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL || 'https://intern.talkdrill.com'
+  ),
   title: 'TalkDrill Internships',
   description: 'TalkDrill internship portal — tasks, points, and rewards.',
   icons: { icon: '/favicon.ico', apple: '/apple-touch-icon.png' },

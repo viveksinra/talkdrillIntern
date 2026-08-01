@@ -140,7 +140,9 @@ function CodeBoxes({
           sx={{
             flex: 1,
             minWidth: 0,
-            '& .MuiOutlinedInput-root': { borderRadius: 2 },
+            // A 6-up row makes each box narrow; a softer radius keeps them
+            // reading as boxes rather than pills.
+            '& .MuiOutlinedInput-root': { borderRadius: 1.5 },
           }}
         />
       ))}
@@ -445,8 +447,10 @@ export default function LoginPage() {
                   </Alert>
                 )}
 
-                {/* Fixed floor so the card does not jump between steps. */}
-                <Box sx={{ minHeight: 320 }}>
+                {/* Floor tall enough to absorb the step-to-step jump without
+                    leaving the (short) email step stranded in white space.
+                    Phones have no room to spare, so they opt out. */}
+                <Box sx={{ minHeight: { xs: 0, sm: 236 } }}>
                   <Fade in key={step}>
                     <Box>
                       {step === 'email' && (
