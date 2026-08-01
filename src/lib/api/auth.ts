@@ -21,13 +21,22 @@ export async function getAuthMethod(email: string): Promise<'otp' | 'password'> 
 
 // ── Intern login: email OTP ──────────────────────────────────────────────
 
-export async function sendEmailOtp(email: string): Promise<{ suggestion?: string | null }> {
-  const res = await api<{ suggestion?: string | null }>('/auth/send-email-otp', {
-    method: 'POST',
-    body: { email },
-    auth: false,
-  });
-  return res.myData ?? {};
+/**
+ * `otpLength` matters: the backend issues 4-digit codes for some accounts and
+ * 6 for others, so the code UI must be built from this and never hardcoded.
+ */
+export async function sendEmailOtp(
+  email: string
+): Promise<{ suggestion?: string | null; otpLength: number }> {
+  const res = await api<{ suggestion?: string | null; otpLength?: number }>(
+    '/auth/send-email-otp',
+    { method: 'POST', body: { email }, auth: false }
+  );
+  const len = Number(res.myData?.otpLength);
+  return {
+    suggestion: res.myData?.suggestion ?? null,
+    otpLength: Number.isFinite(len) && len >= 4 && len <= 8 ? len : 6,
+  };
 }
 
 interface VerifyEmailOtpData {

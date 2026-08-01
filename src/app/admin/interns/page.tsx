@@ -8,27 +8,39 @@ import Avatar from '@mui/material/Avatar';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
-import CardActionArea from '@mui/material/CardActionArea';
 import Checkbox from '@mui/material/Checkbox';
-import Chip from '@mui/material/Chip';
 import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
 import DialogTitle from '@mui/material/DialogTitle';
+import Divider from '@mui/material/Divider';
 import Grid from '@mui/material/Grid';
 import MenuItem from '@mui/material/MenuItem';
 import Stack from '@mui/material/Stack';
+import Table from '@mui/material/Table';
+import TableBody from '@mui/material/TableBody';
+import TableCell from '@mui/material/TableCell';
+import TableHead from '@mui/material/TableHead';
+import TablePagination from '@mui/material/TablePagination';
+import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import AddIcon from '@mui/icons-material/Add';
 import ChevronRightRoundedIcon from '@mui/icons-material/ChevronRightRounded';
 import { DataState, errorMessage, Loading } from '@/components/DataStates';
-import StatusChip from '@/components/StatusChip';
+import EmptyState from '@/components/EmptyState';
+import Label, { type LabelColor } from '@/components/Label';
+import MetaLine from '@/components/MetaLine';
+import Reveal from '@/components/Reveal';
+import SectionHead from '@/components/SectionHead';
+import { statusLabel } from '@/components/StatusChip';
+import { ART } from '@/lib/art';
 import { createIntern, listInterns, listPrograms } from '@/lib/api/adminInternship';
 import type { InternStatus, Track } from '@/lib/api/types';
-import AdminScreen, { useSnack } from '../_shared/AdminScreen';
+import AdminScreen, { ScrollArea, useSnack } from '../_shared/AdminScreen';
 import {
   asList,
+  fmtDate,
   fmtNumber,
   internLabel,
   programNames,
@@ -41,121 +53,301 @@ import { useAsync } from '../_shared/useAsync';
 
 const STATUSES: InternStatus[] = ['invited', 'active', 'paused', 'completed', 'removed'];
 
-/** Quiet caption line: dates, counts, programme names — middot separated. */
-function MetaLine({ items }: { items: React.ReactNode[] }) {
-  const parts = items.filter(Boolean);
-  if (!parts.length) return null;
+const PAGE_SIZE_OPTIONS = [10, 25, 50];
+
+/** Status → Label tone. Quiet by default so a screen of rows is not a rainbow. */
+const STATUS_TONE: Record<InternStatus, LabelColor> = {
+  invited: 'info',
+  active: 'success',
+  paused: 'warning',
+  completed: 'primary',
+  removed: 'default',
+};
+
+function statusTone(status: string): LabelColor {
+  return STATUS_TONE[status as InternStatus] ?? 'default';
+}
+
+/** Initials for the avatar — first letter of the name, or of the email. */
+function initialOf(intern: InternRow): string {
+  return (intern.fullName || intern.email || '?').trim().charAt(0).toUpperCase();
+}
+
+/** Row entrance, applied on <tr> — Reveal renders a div, which tbody rejects. */
+function rowRevealSx(index: number) {
+  return {
+    '@keyframes tdRowIn': {
+      from: { opacity: 0, transform: 'translateY(10px)' },
+      to: { opacity: 1, transform: 'translateY(0)' },
+    },
+    animation: 'tdRowIn .45s cubic-bezier(.16,1,.3,1) both',
+    animationDelay: `${Math.min(index, 10) * 0.04}s`,
+    '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
+  };
+}
+
+/** The warning pill that jumps straight to the queue. Dead text before. */
+function ToReviewLink({ count }: { count: number }) {
   return (
-    <Stack
-      direction="row"
-      alignItems="center"
+    <Box
+      component={Link}
+      href="/admin/verify"
+      onClick={(e: React.MouseEvent) => e.stopPropagation()}
       sx={{
-        mt: 1,
-        gap: 0.75,
-        flexWrap: 'wrap',
-        typography: 'caption',
-        color: 'text.secondary',
+        position: 'relative',
+        zIndex: 2,
+        display: 'inline-flex',
+        textDecoration: 'none',
+        borderRadius: 0.75,
+        '&:hover > span': { filter: 'brightness(0.94)' },
       }}
     >
-      {parts.map((part, i) => (
-        <React.Fragment key={i}>
-          {i > 0 && (
-            <Box component="span" sx={{ color: 'text.disabled' }}>
-              ·
-            </Box>
-          )}
-          {part}
-        </React.Fragment>
-      ))}
-    </Stack>
+      <Label color="warning" variant="soft" sx={{ cursor: 'pointer' }}>
+        {count} to review
+      </Label>
+    </Box>
   );
 }
 
 /**
- * One intern as a single tap target into their record. Status and track are the
- * only chips — programme, pending reviews and lifetime points are quiet text, so
- * a screen of forty interns reads as a list rather than a wall of pills.
+ * md+ reads as a real table: one row per intern, scannable columns, whole row a
+ * link into the record. Below sm the same data folds into a compact card so a
+ * 390px screen is not a sideways scroll.
  */
-function InternCard({ intern }: { intern: InternRow }) {
-  const name = internLabel(intern);
-  const initial = (intern.fullName || intern.email || '?').trim().charAt(0).toUpperCase();
+function InternsTable({ rows }: { rows: InternRow[] }) {
+  const head = ['Intern', 'Track', 'Status', 'Points', 'To review', 'Joined'];
+
+  return (
+    <ScrollArea>
+      <Table size="small" sx={{ minWidth: 880 }}>
+        <TableHead>
+          <TableRow>
+            {head.map((h) => (
+              <TableCell
+                key={h}
+                align={h === 'Points' ? 'right' : 'left'}
+                sx={{ typography: 'overline', color: 'text.secondary', whiteSpace: 'nowrap' }}
+              >
+                {h}
+              </TableCell>
+            ))}
+            <TableCell sx={{ width: 40 }} />
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {rows.map((intern, i) => {
+            const pending = intern.pendingSubmissions ?? 0;
+            const href = `/admin/interns/${intern._id}`;
+            return (
+              <TableRow
+                key={intern._id}
+                hover
+                sx={{
+                  position: 'relative',
+                  cursor: 'pointer',
+                  '&:hover .td-chevron': { color: 'primary.main', transform: 'translateX(2px)' },
+                  ...rowRevealSx(i),
+                }}
+              >
+                <TableCell sx={{ maxWidth: 320 }}>
+                  <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0 }}>
+                    <Avatar
+                      sx={{
+                        width: 36,
+                        height: 36,
+                        fontSize: 15,
+                        fontWeight: 800,
+                        flexShrink: 0,
+                        bgcolor: 'primary.lighter',
+                        color: 'primary.dark',
+                      }}
+                    >
+                      {initialOf(intern)}
+                    </Avatar>
+                    <Box sx={{ minWidth: 0 }}>
+                      {/* The stretched link makes the whole row a target while
+                          keeping the markup valid inside <tbody>. */}
+                      <Box
+                        component={Link}
+                        href={href}
+                        sx={{
+                          display: 'block',
+                          color: 'text.primary',
+                          textDecoration: 'none',
+                          fontWeight: 700,
+                          fontSize: 14,
+                          wordBreak: 'break-word',
+                          '&::after': { content: '""', position: 'absolute', inset: 0, zIndex: 1 },
+                        }}
+                      >
+                        {internLabel(intern)}
+                      </Box>
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{ display: 'block', wordBreak: 'break-all' }}
+                      >
+                        {intern.email}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </TableCell>
+
+                <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                  {intern.track ? (
+                    <Label color="default" variant="soft">
+                      {titleCase(intern.track)}
+                    </Label>
+                  ) : (
+                    <Typography variant="caption" color="text.disabled">
+                      —
+                    </Typography>
+                  )}
+                </TableCell>
+
+                <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                  <Stack spacing={0.5} alignItems="flex-start">
+                    <Label color={statusTone(intern.status)} variant="soft">
+                      {statusLabel(intern.status)}
+                    </Label>
+                    {!intern.userId && (
+                      <Label color="info" variant="outlined">
+                        Not signed in yet
+                      </Label>
+                    )}
+                  </Stack>
+                </TableCell>
+
+                <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                  <Typography
+                    className="tnum"
+                    variant="body2"
+                    sx={{ fontWeight: 800, color: 'primary.main' }}
+                  >
+                    {fmtNumber(intern.pointsBalance ?? 0)}
+                  </Typography>
+                  <Typography className="tnum" variant="caption" color="text.disabled">
+                    {fmtNumber(intern.totalPointsEarned ?? 0)} earned
+                  </Typography>
+                </TableCell>
+
+                <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                  {pending > 0 ? (
+                    <ToReviewLink count={pending} />
+                  ) : (
+                    <Typography variant="caption" color="text.disabled">
+                      —
+                    </Typography>
+                  )}
+                </TableCell>
+
+                <TableCell sx={{ whiteSpace: 'nowrap', color: 'text.secondary' }}>
+                  <Typography variant="caption">{fmtDate(intern.createdAt)}</Typography>
+                </TableCell>
+
+                <TableCell align="right" sx={{ width: 40 }}>
+                  <ChevronRightRoundedIcon
+                    className="td-chevron"
+                    sx={{
+                      fontSize: 20,
+                      color: 'text.disabled',
+                      transition: (t) =>
+                        t.transitions.create(['color', 'transform'], { duration: 160 }),
+                    }}
+                  />
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </ScrollArea>
+  );
+}
+
+/** xs fallback for the table — same six facts, stacked. */
+function InternCard({ intern, index }: { intern: InternRow; index: number }) {
   const pending = intern.pendingSubmissions ?? 0;
 
   return (
-    <Card
-      sx={{
-        height: '100%',
-        overflow: 'hidden',
-        transition: (t) =>
-          t.transitions.create(['box-shadow', 'transform', 'border-color'], { duration: 200 }),
-        '&:hover': {
-          transform: { md: 'translateY(-2px)' },
-          borderColor: 'primary.light',
-          boxShadow: (t) => t.customShadows.cardHover,
-        },
-      }}
-    >
-      <CardActionArea
-        component={Link}
-        href={`/admin/interns/${intern._id}`}
-        sx={{ p: { xs: 2, sm: 2.25 }, height: '100%', alignItems: 'flex-start' }}
+    <Reveal index={index}>
+      <Card
+        sx={{
+          position: 'relative',
+          p: 2,
+          transition: (t) => t.transitions.create(['box-shadow', 'border-color'], { duration: 180 }),
+          '&:hover': { boxShadow: (t) => t.customShadows.cardHover, borderColor: 'primary.light' },
+        }}
       >
-        <Stack direction="row" spacing={1.75} alignItems="flex-start" sx={{ width: '100%' }}>
+        <Stack direction="row" spacing={1.5} alignItems="flex-start">
           <Avatar
             sx={{
-              flexShrink: 0,
-              width: 44,
-              height: 44,
+              width: 36,
+              height: 36,
+              fontSize: 15,
               fontWeight: 800,
+              flexShrink: 0,
               bgcolor: 'primary.lighter',
               color: 'primary.dark',
             }}
           >
-            {initial}
+            {initialOf(intern)}
           </Avatar>
 
           <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 700, wordBreak: 'break-word' }}>
-              {name}
+            <Box
+              component={Link}
+              href={`/admin/interns/${intern._id}`}
+              sx={{
+                display: 'block',
+                color: 'text.primary',
+                textDecoration: 'none',
+                fontWeight: 700,
+                fontSize: 14,
+                wordBreak: 'break-word',
+                '&::after': { content: '""', position: 'absolute', inset: 0, zIndex: 1 },
+              }}
+            >
+              {internLabel(intern)}
+            </Box>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: 'block', wordBreak: 'break-all' }}
+            >
+              {intern.email}
             </Typography>
-            {intern.fullName && (
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ display: 'block', wordBreak: 'break-all' }}
-              >
-                {intern.email}
-              </Typography>
-            )}
 
             <Stack direction="row" sx={{ mt: 1, gap: 0.75, flexWrap: 'wrap' }}>
-              <StatusChip status={intern.status} />
-              <Chip
-                size="small"
-                variant="outlined"
-                label={titleCase(intern.track ?? 'no track')}
-              />
+              <Label color={statusTone(intern.status)} variant="soft">
+                {statusLabel(intern.status)}
+              </Label>
+              {intern.track && (
+                <Label color="default" variant="soft">
+                  {titleCase(intern.track)}
+                </Label>
+              )}
+              {!intern.userId && (
+                <Label color="info" variant="outlined">
+                  Not signed in yet
+                </Label>
+              )}
+              {pending > 0 && <ToReviewLink count={pending} />}
             </Stack>
 
             <MetaLine
-              items={[
+              sx={{ mt: 1 }}
+              parts={[
                 programNames(intern.programIds),
-                `${fmtNumber(intern.totalPointsEarned ?? 0)} earned`,
-                pending > 0 ? (
-                  <Box component="span" sx={{ color: 'warning.dark', fontWeight: 700 }}>
-                    {pending} to review
-                  </Box>
-                ) : null,
-                !intern.userId ? (
-                  <Box component="span" sx={{ color: 'text.disabled' }}>
-                    Not signed in yet
-                  </Box>
-                ) : null,
+                <Box component="span" key="earned" className="tnum">
+                  {fmtNumber(intern.totalPointsEarned ?? 0)} earned
+                </Box>,
+                `joined ${fmtDate(intern.createdAt)}`,
               ]}
             />
           </Box>
 
-          <Stack alignItems="flex-end" sx={{ flexShrink: 0, pl: 0.5 }}>
+          <Stack alignItems="flex-end" sx={{ flexShrink: 0 }}>
             <Typography
               className="tnum"
               sx={{ fontWeight: 800, fontSize: 18, lineHeight: 1.1, color: 'primary.main' }}
@@ -166,13 +358,9 @@ function InternCard({ intern }: { intern: InternRow }) {
               pts
             </Typography>
           </Stack>
-
-          <ChevronRightRoundedIcon
-            sx={{ display: { xs: 'none', sm: 'block' }, color: 'text.disabled', mt: 0.5 }}
-          />
         </Stack>
-      </CardActionArea>
-    </Card>
+      </Card>
+    </Reveal>
   );
 }
 
@@ -185,12 +373,20 @@ function InternsBody() {
   const [track, setTrack] = useState<Track | ''>('');
   const [status, setStatus] = useState<InternStatus | ''>('');
   const [programId, setProgramId] = useState(params.get('programId') ?? '');
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
 
   // Debounced search — the list endpoint regex-scans email and name.
   useEffect(() => {
     const t = setTimeout(() => setQ(search.trim()), 350);
     return () => clearTimeout(t);
   }, [search]);
+
+  // A narrowed result set has fewer pages — page 4 of the old filter is not a
+  // valid page of the new one, so every filter change goes back to the top.
+  useEffect(() => {
+    setPage(0);
+  }, [q, track, status, programId, rowsPerPage]);
 
   const programs = useAsync(async () => asList<ProgramRow>(await listPrograms()), []);
   const interns = useAsync(
@@ -200,14 +396,24 @@ function InternsBody() {
         track: track || undefined,
         status: status || undefined,
         programId: programId || undefined,
+        limit: rowsPerPage,
+        skip: page * rowsPerPage,
       }),
-    [q, track, status, programId]
+    [q, track, status, programId, page, rowsPerPage]
   );
 
   const rows = asList<InternRow>(interns.data?.items);
   const total = interns.data?.total ?? rows.length;
   const programList = asList<ProgramRow>(programs.data);
   const filtered = Boolean(q || track || status || programId);
+
+  const clearFilters = () => {
+    setSearch('');
+    setQ('');
+    setTrack('');
+    setStatus('');
+    setProgramId('');
+  };
 
   const [addOpen, setAddOpen] = useState(false);
   const [newEmail, setNewEmail] = useState('');
@@ -254,6 +460,7 @@ function InternsBody() {
           display: 'flex',
           flexDirection: { xs: 'column', sm: 'row' },
           flexWrap: 'wrap',
+          alignItems: { sm: 'center' },
           gap: 1.25,
         }}
       >
@@ -309,58 +516,107 @@ function InternsBody() {
             </MenuItem>
           ))}
         </TextField>
+        {filtered && (
+          <Button size="small" color="inherit" onClick={clearFilters} sx={{ flexShrink: 0 }}>
+            Clear filters
+          </Button>
+        )}
       </Box>
 
       <Box>
-        {/* Typographic section head, not a filled slab competing with the cards. */}
-        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5, px: 0.5 }}>
-          <Typography variant="overline" sx={{ color: 'primary.main' }}>
-            {filtered ? 'Matching interns' : 'All interns'}
-          </Typography>
-          <Typography
-            className="tnum"
-            variant="caption"
-            sx={{ color: 'text.disabled', fontWeight: 600 }}
-          >
-            {filtered ? `${rows.length} of ${total}` : fmtNumber(total)}
-          </Typography>
-          <Box sx={{ flexGrow: 1 }} />
-          <Button
-            variant="contained"
-            size="small"
-            startIcon={<AddIcon />}
-            onClick={() => setAddOpen(true)}
-          >
-            Add intern
-          </Button>
-        </Stack>
+        <SectionHead
+          label={filtered ? 'Matching interns' : 'All interns'}
+          count={total}
+          caption={
+            total > rows.length
+              ? `Showing ${fmtNumber(page * rowsPerPage + (rows.length ? 1 : 0))}–${fmtNumber(
+                  page * rowsPerPage + rows.length
+                )}`
+              : undefined
+          }
+          action={
+            <Button
+              variant="contained"
+              size="small"
+              startIcon={<AddIcon />}
+              onClick={() => setAddOpen(true)}
+            >
+              Add intern
+            </Button>
+          }
+        />
 
         <DataState
           loading={interns.loading && !interns.data}
           error={interns.error && !interns.data ? interns.error : undefined}
           onRetry={interns.reload}
-          isEmpty={!rows.length}
-          emptyTitle={filtered ? 'No interns match those filters' : 'No interns enrolled yet'}
-          emptyDescription={
-            filtered
-              ? 'Try clearing a filter, or search by the email they signed up with.'
-              : 'Add someone here, or bulk-enrol a whole batch from the Programs screen.'
-          }
-          emptyAction={
-            <Button variant="contained" startIcon={<AddIcon />} onClick={() => setAddOpen(true)}>
-              Add intern
-            </Button>
-          }
           skeletonRows={4}
         >
-          {/* Interns are compared against each other, so two-up from sm. */}
-          <Grid container spacing={2}>
-            {rows.map((intern) => (
-              <Grid key={intern._id} size={{ xs: 12, sm: 6 }}>
-                <InternCard intern={intern} />
-              </Grid>
-            ))}
-          </Grid>
+          {!rows.length ? (
+            <EmptyState
+              art={filtered ? ART.empty.search : ART.mascot.wave}
+              title={filtered ? 'No interns match those filters' : 'No interns enrolled yet'}
+              description={
+                filtered
+                  ? 'Try clearing a filter, or search by the email they signed up with.'
+                  : 'Add someone here, or bulk-enrol a whole batch from the Programs screen.'
+              }
+              action={
+                filtered ? (
+                  <Button variant="outlined" onClick={clearFilters}>
+                    Clear filters
+                  </Button>
+                ) : (
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={() => setAddOpen(true)}
+                  >
+                    Add intern
+                  </Button>
+                )
+              }
+            />
+          ) : (
+            <>
+              {/* One table on md+, the same rows as cards below it. */}
+              <Card sx={{ display: { xs: 'none', md: 'block' } }}>
+                <InternsTable rows={rows} />
+                <Divider />
+                <TablePagination
+                  component="div"
+                  count={total}
+                  page={page}
+                  onPageChange={(_, next) => setPage(next)}
+                  rowsPerPage={rowsPerPage}
+                  onRowsPerPageChange={(e) => setRowsPerPage(Number(e.target.value))}
+                  rowsPerPageOptions={PAGE_SIZE_OPTIONS}
+                  labelRowsPerPage="Per page"
+                />
+              </Card>
+
+              <Box sx={{ display: { xs: 'block', md: 'none' } }}>
+                <Grid container spacing={1.5}>
+                  {rows.map((intern, i) => (
+                    <Grid key={intern._id} size={{ xs: 12, sm: 6 }}>
+                      <InternCard intern={intern} index={i} />
+                    </Grid>
+                  ))}
+                </Grid>
+                <TablePagination
+                  component="div"
+                  count={total}
+                  page={page}
+                  onPageChange={(_, next) => setPage(next)}
+                  rowsPerPage={rowsPerPage}
+                  onRowsPerPageChange={(e) => setRowsPerPage(Number(e.target.value))}
+                  rowsPerPageOptions={PAGE_SIZE_OPTIONS}
+                  labelRowsPerPage="Per page"
+                  sx={{ mt: 1, '& .MuiTablePagination-toolbar': { pl: 0 } }}
+                />
+              </Box>
+            </>
+          )}
         </DataState>
       </Box>
 

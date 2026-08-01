@@ -2,43 +2,65 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Checkbox from '@mui/material/Checkbox';
-import Chip from '@mui/material/Chip';
 import FormControlLabel from '@mui/material/FormControlLabel';
+import Grid from '@mui/material/Grid';
 import Stack from '@mui/material/Stack';
 import Switch from '@mui/material/Switch';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
+import { alpha, useTheme } from '@mui/material/styles';
+import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded';
+import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded';
+import CheckRoundedIcon from '@mui/icons-material/CheckRounded';
 import AppShell from '@/components/AppShell';
+import Art from '@/components/Art';
 import { ErrorState, Loading, errorMessage } from '@/components/DataStates';
-import PageHeader from '@/components/PageHeader';
+import Label from '@/components/Label';
+import Reveal from '@/components/Reveal';
+import SectionHead from '@/components/SectionHead';
 import { RequireAuth } from '@/lib/auth/guards';
+import { ART } from '@/lib/art';
+import { celebrate, haptic } from '@/lib/juice';
 import { getMe, updateMyProfile, type MeResponse } from '@/lib/api/internship';
+import { isPopulated } from '@/lib/api/types';
 import type { SocialHandles, Track, UpdateMyProfileBody } from '@/lib/api/types';
+import { FONT_DISPLAY, hoverLift } from '@/theme';
 
-const TRACKS: { value: Track; label: string; blurb: string }[] = [
+const TRACKS: {
+  value: Track;
+  label: string;
+  blurb: string;
+  /** How this track turns work into points — one short line under the blurb. */
+  earn: string;
+  art: string;
+}[] = [
   {
     value: 'campus',
     label: 'Campus Ambassador',
     blurb: 'Run demos, put up posters and bring your campus onto TalkDrill.',
+    earn: 'Points for every approved task',
+    art: ART.track.campus,
   },
   {
     value: 'content',
     label: 'Content Creator',
-    blurb: 'Post reels and shorts about speaking English. Rewards scale with 30-day views.',
+    blurb: 'Post reels and shorts about speaking English.',
+    earn: 'Task points + rewards that scale with 30-day views',
+    art: ART.track.content,
   },
   {
     value: 'marketing',
     label: 'Digital Marketing',
     blurb: 'Community outreach, groups and growth experiments with the team.',
+    earn: 'Points for every approved task',
+    art: ART.track.marketing,
   },
 ];
 
@@ -49,101 +71,135 @@ const HANDLE_FIELDS: { key: keyof SocialHandles; label: string; placeholder: str
   { key: 'other', label: 'Anything else', placeholder: 'X, Threads, blog…' },
 ];
 
-/** Card sub-head: typographic, never a filled slab. */
-function SectionHead({
-  title,
-  caption,
-  tone = 'primary',
-}: {
-  title: string;
-  caption?: string;
-  tone?: 'primary' | 'muted';
-}) {
-  return (
-    <Box sx={{ mb: caption ? 2 : 1.5 }}>
-      <Typography
-        variant="overline"
-        sx={{ display: 'block', color: tone === 'primary' ? 'primary.main' : 'text.secondary' }}
-      >
-        {title}
-      </Typography>
-      {caption && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-          {caption}
-        </Typography>
-      )}
-    </Box>
-  );
-}
+/** The single guidelines sentence, split into the promises it actually makes. */
+const GUIDELINES = [
+  'My own work only',
+  'Honest proof on every submission',
+  'No fake metrics',
+  'Rewards follow the reward table for my track',
+];
 
-function TrackPicker({ value, onChange }: { value: Track | ''; onChange: (t: Track) => void }) {
+const STEP_TITLES = ['Welcome', 'Pick your track', 'Where you post'];
+
+/** 8px dots, the active one stretched to a 24px pill. */
+function StepDots({ step, total }: { step: number; total: number }) {
   return (
-    <Stack spacing={1.25} role="radiogroup" aria-label="Internship track">
-      {TRACKS.map((track) => {
-        const selected = value === track.value;
-        return (
-          <Box
-            key={track.value}
-            onClick={() => onChange(track.value)}
-            role="radio"
-            aria-checked={selected}
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                onChange(track.value);
-              }
-            }}
-            sx={{
-              p: 1.75,
-              borderRadius: 2.5,
-              cursor: 'pointer',
-              minHeight: 44,
-              border: '1px solid',
-              // Selection is exactly the state a coloured border is reserved for.
-              borderColor: selected ? 'primary.main' : 'divider',
-              bgcolor: selected ? 'primary.lighter' : 'background.paper',
-              transition: (t) =>
-                t.transitions.create(['border-color', 'background-color'], { duration: 160 }),
-              '&:hover': { borderColor: selected ? 'primary.main' : 'primary.light' },
-            }}
-          >
-            <Stack direction="row" spacing={1.25} alignItems="flex-start">
-              <Box
-                sx={{
-                  mt: '2px',
-                  display: 'flex',
-                  color: selected ? 'primary.main' : 'text.disabled',
-                  '& svg': { fontSize: 20 },
-                }}
-              >
-                {selected ? <CheckCircleIcon /> : <RadioButtonUncheckedIcon />}
-              </Box>
-              <Box sx={{ minWidth: 0 }}>
-                <Typography
-                  variant="subtitle2"
-                  sx={{ fontWeight: 700, color: selected ? 'primary.darker' : 'text.primary' }}
-                >
-                  {track.label}
-                </Typography>
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                  {track.blurb}
-                </Typography>
-              </Box>
-            </Stack>
-          </Box>
-        );
-      })}
+    <Stack
+      direction="row"
+      spacing={1}
+      justifyContent="center"
+      alignItems="center"
+      aria-hidden
+      sx={{ mb: 2 }}
+    >
+      {Array.from({ length: total }, (_, i) => (
+        <Box
+          key={i}
+          sx={{
+            height: 8,
+            width: i === step ? 24 : 8,
+            borderRadius: 99,
+            bgcolor: i === step ? 'primary.main' : i < step ? 'primary.light' : 'divider',
+            transition: (t) =>
+              t.transitions.create(['width', 'background-color'], { duration: 260 }),
+          }}
+        />
+      ))}
     </Stack>
   );
 }
 
-function OnboardingForm({ me, onSaved }: { me: MeResponse; onSaved: (m: MeResponse) => void }) {
+function TrackCard({
+  track,
+  selected,
+  locked,
+  onSelect,
+}: {
+  track: (typeof TRACKS)[number];
+  selected: boolean;
+  locked?: boolean;
+  onSelect?: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <Card
+      onClick={onSelect}
+      role={onSelect ? 'radio' : undefined}
+      aria-checked={onSelect ? selected : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      onKeyDown={
+        onSelect
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onSelect();
+              }
+            }
+          : undefined
+      }
+      sx={{
+        height: '100%',
+        p: 2.5,
+        cursor: onSelect ? 'pointer' : 'default',
+        textAlign: 'center',
+        position: 'relative',
+        border: '2px solid',
+        borderColor: selected ? 'primary.main' : 'transparent',
+        bgcolor: selected ? 'primary.lighter' : 'background.paper',
+        boxShadow: selected
+          ? `0 0 0 4px ${alpha(theme.palette.primary.main, 0.12)}, 0 18px 36px -18px ${alpha(
+              theme.palette.primary.main,
+              0.7
+            )}`
+          : undefined,
+        ...(onSelect ? hoverLift(theme.palette.primary.main) : null),
+      }}
+    >
+      {selected && (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: 12,
+            right: 12,
+            width: 24,
+            height: 24,
+            borderRadius: '50%',
+            display: 'grid',
+            placeItems: 'center',
+            bgcolor: 'primary.main',
+            color: 'common.white',
+          }}
+        >
+          <CheckRoundedIcon sx={{ fontSize: 16 }} />
+        </Box>
+      )}
+      <Stack alignItems="center" spacing={1.25}>
+        <Art src={track.art} size={96} />
+        <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1.25 }}>
+          {track.label}
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ minHeight: { sm: 40 } }}>
+          {track.blurb}
+        </Typography>
+        <Typography
+          variant="caption"
+          sx={{ display: 'block', color: 'primary.dark', fontWeight: 600 }}
+        >
+          {track.earn}
+        </Typography>
+        {locked && <Label color="primary">Assigned</Label>}
+      </Stack>
+    </Card>
+  );
+}
+
+function OnboardingWizard({ me, onSaved }: { me: MeResponse; onSaved: (m: MeResponse) => void }) {
   const router = useRouter();
   const profile = me.internProfile!;
   // The track is a one-way choice on the backend — once set, the team owns changes.
   const trackLocked = Boolean(profile.track);
 
+  const [step, setStep] = useState(0);
   const [fullName, setFullName] = useState(profile.fullName || me.user?.name || '');
   const [track, setTrack] = useState<Track | ''>(profile.track ?? '');
   const [appLinkInBio, setAppLinkInBio] = useState(profile.appLinkInBio);
@@ -153,6 +209,22 @@ function OnboardingForm({ me, onSaved }: { me: MeResponse; onSaved: (m: MeRespon
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const alreadyOnboarded = profile.onboardingAccepted;
+
+  // Greeting is fixed at mount — it should not re-type itself while the field is edited.
+  const firstName = useMemo(() => {
+    const source = (profile.fullName || me.user?.name || '').trim();
+    return source ? source.split(/\s+/)[0] : '';
+  }, [profile.fullName, me.user?.name]);
+
+  // programIds may arrive as ids or as populated batches; only name what we actually have.
+  const batchName = useMemo(() => {
+    const names = (profile.programIds || [])
+      .map((p) => (isPopulated(p) ? p.name : null))
+      .filter((n): n is string => Boolean(n));
+    return names.length ? names.join(' · ') : null;
+  }, [profile.programIds]);
+
+  const lockedTrack = TRACKS.find((t) => t.value === profile.track);
 
   const setHandle = (key: keyof SocialHandles, value: string) =>
     setHandles((prev) => ({ ...prev, [key]: value }));
@@ -173,6 +245,7 @@ function OnboardingForm({ me, onSaved }: { me: MeResponse; onSaved: (m: MeRespon
     try {
       const updated = await updateMyProfile(body);
       onSaved({ ...me, internProfile: updated });
+      celebrate();
       router.push('/tasks');
     } catch (e) {
       setSaveError(errorMessage(e, 'Could not save your details.'));
@@ -182,137 +255,289 @@ function OnboardingForm({ me, onSaved }: { me: MeResponse; onSaved: (m: MeRespon
   };
 
   const canSubmit = accepted && (trackLocked || Boolean(track)) && !saving;
+  // Same gates as before, just checked at the step that owns them.
+  const stepValid = [true, trackLocked || Boolean(track), accepted][step];
+
+  const go = (next: number) => {
+    haptic(10);
+    setStep(next);
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   return (
-    <Stack spacing={2.5}>
-      {alreadyOnboarded ? (
-        <Alert
-          severity="success"
-          action={
-            <Button component={Link} href="/tasks" color="inherit" size="small">
-              My tasks
-            </Button>
-          }
-        >
-          You are set up. Keep this page handy — your handles are what reviewers check your proof
-          against.
-        </Alert>
-      ) : (
-        <Alert severity="info">
-          Two minutes and you are in. We only ask for what we need to verify your work and pay out
-          rewards.
-        </Alert>
+    <Box sx={{ maxWidth: 720, mx: 'auto' }}>
+      <StepDots step={step} total={3} />
+      <Typography
+        variant="caption"
+        sx={{
+          display: 'block',
+          textAlign: 'center',
+          color: 'text.disabled',
+          fontWeight: 600,
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+          mb: 2.5,
+        }}
+      >
+        Step {step + 1} of 3 · {STEP_TITLES[step]}
+      </Typography>
+
+      {/* ── Step 1: welcome + who you are ─────────────────────────────── */}
+      {step === 0 && (
+        <Stack spacing={2.5}>
+          <Reveal index={0}>
+            <Stack alignItems="center" spacing={1.5} sx={{ textAlign: 'center' }}>
+              <Art src={ART.scene.onboardingWelcome} size={{ xs: 150, sm: 180 }} />
+              <Typography
+                variant="h4"
+                sx={{ fontFamily: FONT_DISPLAY, fontWeight: 600, lineHeight: 1.15 }}
+              >
+                {firstName ? `Welcome aboard, ${firstName}` : 'Welcome aboard'}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 420 }}>
+                Two minutes and you are in. We only ask for what we need to verify your work and
+                pay out rewards.
+              </Typography>
+              {batchName && <Label color="secondary">{batchName}</Label>}
+            </Stack>
+          </Reveal>
+
+          {alreadyOnboarded && (
+            <Reveal index={1}>
+              <Stack
+                direction="row"
+                spacing={1.5}
+                alignItems="center"
+                sx={{
+                  px: 2,
+                  py: 1.25,
+                  borderRadius: 2,
+                  bgcolor: 'success.lighter',
+                  color: 'success.darker',
+                }}
+              >
+                <Label color="success">Set up</Label>
+                <Typography variant="body2" sx={{ flexGrow: 1, minWidth: 0 }}>
+                  You are already set up — edit anything here and save again.
+                </Typography>
+                <Button component={Link} href="/tasks" size="small" color="success">
+                  My tasks
+                </Button>
+              </Stack>
+            </Reveal>
+          )}
+
+          <Reveal index={2}>
+            <Card>
+              <CardContent>
+                <SectionHead
+                  label="Your details"
+                  caption="This is the name that goes on your certificate."
+                />
+                <Stack spacing={2}>
+                  <TextField
+                    label="Full name"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    inputProps={{ maxLength: 120 }}
+                  />
+                  <TextField
+                    label="Email"
+                    value={profile.email}
+                    disabled
+                    helperText="Set by the team."
+                  />
+                </Stack>
+              </CardContent>
+            </Card>
+          </Reveal>
+        </Stack>
       )}
 
-      <Card>
-        <CardContent>
-          <SectionHead title="Your details" caption="This is the name that goes on your certificate." />
-          <Stack spacing={2}>
-            <TextField
-              label="Full name"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              inputProps={{ maxLength: 120 }}
-            />
-            <TextField label="Email" value={profile.email} disabled helperText="Set by the team." />
-          </Stack>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent>
+      {/* ── Step 2: the track ─────────────────────────────────────────── */}
+      {step === 1 && (
+        <Stack spacing={2.5}>
           <SectionHead
-            title="Your track"
+            label="Pick your track"
             caption={
               trackLocked
                 ? 'Set by the team. Message us if it looks wrong — switching it later would orphan your assigned tasks.'
                 : 'This decides your tasks and rewards, and only the team can change it afterwards.'
             }
           />
-          {trackLocked ? (
-            <Chip
-              color="primary"
-              sx={{ fontWeight: 700 }}
-              label={TRACKS.find((t) => t.value === profile.track)?.label ?? profile.track}
-            />
+          {trackLocked && lockedTrack ? (
+            <Grid container spacing={2} justifyContent="center">
+              <Grid size={{ xs: 12, sm: 6, md: 5 }}>
+                <Reveal index={0} sx={{ height: '100%' }}>
+                  <TrackCard track={lockedTrack} selected locked />
+                </Reveal>
+              </Grid>
+            </Grid>
           ) : (
-            <TrackPicker value={track} onChange={setTrack} />
+            <Grid container spacing={2} role="radiogroup" aria-label="Internship track">
+              {TRACKS.map((t, i) => (
+                <Grid key={t.value} size={{ xs: 12, sm: 4 }}>
+                  <Reveal index={i} sx={{ height: '100%' }}>
+                    <TrackCard
+                      track={t}
+                      selected={track === t.value}
+                      onSelect={() => {
+                        haptic(10);
+                        setTrack(t.value);
+                      }}
+                    />
+                  </Reveal>
+                </Grid>
+              ))}
+            </Grid>
           )}
-        </CardContent>
-      </Card>
+        </Stack>
+      )}
 
-      <Card>
-        <CardContent>
-          <SectionHead
-            title="Where you post"
-            caption="Reviewers compare submitted proof against these handles, so keep them current."
-          />
-          <Stack spacing={2}>
-            {HANDLE_FIELDS.map((field) => (
-              <TextField
-                key={field.key}
-                label={field.label}
-                placeholder={field.placeholder}
-                value={handles[field.key] ?? ''}
-                onChange={(e) => setHandle(field.key, e.target.value)}
-                inputProps={{ maxLength: 200 }}
-              />
-            ))}
-          </Stack>
-          <FormControlLabel
-            sx={{ mt: 1.5, mr: 0 }}
-            control={
-              <Switch checked={appLinkInBio} onChange={(e) => setAppLinkInBio(e.target.checked)} />
-            }
-            label={
-              <Typography variant="body2">I have added my TalkDrill link in my bio</Typography>
-            }
-          />
-        </CardContent>
-      </Card>
+      {/* ── Step 3: handles + ground rules ────────────────────────────── */}
+      {step === 2 && (
+        <Stack spacing={2.5}>
+          <Reveal index={0}>
+            <Card>
+              <CardContent>
+                <SectionHead
+                  label="Where you post"
+                  caption="Reviewers compare submitted proof against these handles, so keep them current."
+                />
+                <Stack spacing={2}>
+                  {HANDLE_FIELDS.map((field) => (
+                    <TextField
+                      key={field.key}
+                      label={field.label}
+                      placeholder={field.placeholder}
+                      value={handles[field.key] ?? ''}
+                      onChange={(e) => setHandle(field.key, e.target.value)}
+                      inputProps={{ maxLength: 200 }}
+                    />
+                  ))}
+                </Stack>
+                <FormControlLabel
+                  sx={{ mt: 1.5, mr: 0 }}
+                  control={
+                    <Switch
+                      checked={appLinkInBio}
+                      onChange={(e) => setAppLinkInBio(e.target.checked)}
+                    />
+                  }
+                  label={
+                    <Typography variant="body2">
+                      I have added my TalkDrill link in my bio
+                    </Typography>
+                  }
+                />
+              </CardContent>
+            </Card>
+          </Reveal>
 
-      <Card>
-        <CardContent>
-          <SectionHead title="The ground rules" tone="muted" />
-          <FormControlLabel
-            control={<Checkbox checked={accepted} onChange={(e) => setAccepted(e.target.checked)} />}
-            label={
-              <Typography variant="body2">
-                I accept the internship guidelines: my own work only, honest proof, and no fake
-                metrics. Rewards follow the reward table for my track.
-              </Typography>
-            }
-            sx={{ alignItems: 'flex-start', mr: 0 }}
-          />
-        </CardContent>
-      </Card>
+          <Reveal index={1}>
+            <Card>
+              <CardContent>
+                <SectionHead label="The ground rules" />
+                <Stack component="ul" spacing={1.25} sx={{ m: 0, mb: 2, pl: 0, listStyle: 'none' }}>
+                  {GUIDELINES.map((rule) => (
+                    <Stack key={rule} component="li" direction="row" spacing={1.25} alignItems="center">
+                      <Box
+                        sx={{
+                          width: 22,
+                          height: 22,
+                          borderRadius: '50%',
+                          flexShrink: 0,
+                          display: 'grid',
+                          placeItems: 'center',
+                          bgcolor: 'primary.lighter',
+                          color: 'primary.main',
+                        }}
+                      >
+                        <CheckRoundedIcon sx={{ fontSize: 14 }} />
+                      </Box>
+                      <Typography variant="body2">{rule}</Typography>
+                    </Stack>
+                  ))}
+                </Stack>
+                <FormControlLabel
+                  control={
+                    <Checkbox checked={accepted} onChange={(e) => setAccepted(e.target.checked)} />
+                  }
+                  label={
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      I agree to the internship guidelines
+                    </Typography>
+                  }
+                  sx={{ mr: 0 }}
+                />
+              </CardContent>
+            </Card>
+          </Reveal>
 
-      {saveError && <Alert severity="error">{saveError}</Alert>}
+          {saveError && <Alert severity="error">{saveError}</Alert>}
+        </Stack>
+      )}
 
-      {/* The one primary action on the page — the only full-width button that belongs. */}
-      <Box>
-        <Button
-          fullWidth
-          variant="contained"
-          size="large"
-          disabled={!canSubmit}
-          onClick={submit}
-        >
-          {saving ? 'Saving…' : alreadyOnboarded ? 'Save changes' : 'Start my internship'}
-        </Button>
-        {!canSubmit && !saving && (
+      {/* Wizard controls. Sticky on a phone so the next step is always a thumb away. */}
+      <Box
+        sx={{
+          position: 'sticky',
+          bottom: 0,
+          zIndex: 2,
+          mt: 3,
+          pt: 2,
+          pb: { xs: 'calc(8px + env(safe-area-inset-bottom))', sm: 2 },
+          bgcolor: 'background.default',
+          borderTop: '1px solid',
+          borderColor: 'divider',
+        }}
+      >
+        <Stack direction="row" spacing={1.5} alignItems="center">
+          <Button
+            size="large"
+            color="inherit"
+            startIcon={<ArrowBackRoundedIcon />}
+            disabled={step === 0 || saving}
+            onClick={() => go(step - 1)}
+            sx={{ color: 'text.secondary', visibility: step === 0 ? 'hidden' : 'visible' }}
+          >
+            Back
+          </Button>
+          <Box sx={{ flexGrow: 1 }} />
+          {step < 2 ? (
+            <Button
+              variant="contained"
+              size="large"
+              endIcon={<ArrowForwardRoundedIcon />}
+              disabled={!stepValid}
+              onClick={() => go(step + 1)}
+              sx={{ minWidth: 148 }}
+            >
+              Continue
+            </Button>
+          ) : (
+            <Button
+              variant="contained"
+              size="large"
+              disabled={!canSubmit}
+              onClick={submit}
+              sx={{ minWidth: 190 }}
+            >
+              {saving ? 'Saving…' : alreadyOnboarded ? 'Save changes' : 'Start my internship'}
+            </Button>
+          )}
+        </Stack>
+        {!stepValid && !saving && (
           <Typography
             variant="caption"
             color="text.secondary"
-            sx={{ display: 'block', mt: 0.75, textAlign: 'center' }}
+            sx={{ display: 'block', mt: 0.75, textAlign: 'right' }}
           >
-            {!trackLocked && !track
-              ? 'Pick a track to continue.'
-              : 'Accept the guidelines to continue.'}
+            {step === 1 ? 'Pick a track to continue.' : 'Accept the guidelines to continue.'}
           </Typography>
         )}
       </Box>
-    </Stack>
+    </Box>
   );
 }
 
@@ -344,17 +569,14 @@ function OnboardingBody() {
     );
   }
 
-  return <OnboardingForm me={me} onSaved={setMe} />;
+  return <OnboardingWizard me={me} onSaved={setMe} />;
 }
 
 export default function OnboardingPage() {
   return (
     <RequireAuth>
-      <AppShell>
-        <PageHeader
-          title="Welcome aboard"
-          subtitle="Confirm a few details and your tasks unlock."
-        />
+      {/* No nav: onboarding is a one-way corridor, not a tab. */}
+      <AppShell hideNav>
         <OnboardingBody />
       </AppShell>
     </RequireAuth>

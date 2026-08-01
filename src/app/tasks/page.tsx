@@ -2,29 +2,46 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Alert from '@mui/material/Alert';
-import AlertTitle from '@mui/material/AlertTitle';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardActionArea from '@mui/material/CardActionArea';
-import Chip from '@mui/material/Chip';
+import Divider from '@mui/material/Divider';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import AssignmentTurnedInIcon from '@mui/icons-material/AssignmentTurnedIn';
+import { alpha } from '@mui/material/styles';
+import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
 import ChevronRightRoundedIcon from '@mui/icons-material/ChevronRightRounded';
-import EventIcon from '@mui/icons-material/Event';
-import PriorityHighIcon from '@mui/icons-material/PriorityHigh';
+import EventRoundedIcon from '@mui/icons-material/EventRounded';
+import PriorityHighRoundedIcon from '@mui/icons-material/PriorityHighRounded';
 import AppShell from '@/components/AppShell';
+import Art from '@/components/Art';
+import CountUp from '@/components/CountUp';
 import { ErrorState, Loading } from '@/components/DataStates';
 import EmptyState from '@/components/EmptyState';
+import Label, { type LabelColor } from '@/components/Label';
+import MetaLine from '@/components/MetaLine';
 import PageHeader from '@/components/PageHeader';
-import PointsBadge from '@/components/PointsBadge';
-import StatusChip from '@/components/StatusChip';
+import ProgressRing from '@/components/ProgressRing';
+import Reveal from '@/components/Reveal';
+import SectionHead from '@/components/SectionHead';
+import { statusLabel } from '@/components/StatusChip';
+import { EYEBROW, GLASS_PILL_SX } from '@/components/night';
 import { RequireAuth } from '@/lib/auth/guards';
+import { ART } from '@/lib/art';
+import { celebrateOnce } from '@/lib/juice';
 import { getMe, getMyTasks, type MeResponse } from '@/lib/api/internship';
-import type { AssignedTaskStatus, InternshipTask, MyTasksResponse, Track } from '@/lib/api/types';
+import { FONT_DISPLAY } from '@/theme';
+import type {
+  AssignedTaskStatus,
+  InternProfile,
+  InternshipTask,
+  MyTasksResponse,
+  ProofType,
+  Track,
+} from '@/lib/api/types';
 
 const TRACK_LABELS: Record<Track, string> = {
   campus: 'Campus Ambassador',
@@ -37,12 +54,17 @@ const DATE_FMT = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'shor
 /** Statuses where the intern still owes us something. */
 const NEEDS_ACTION: AssignedTaskStatus[] = ['assigned', 'rejected'];
 
-const CTA_LABEL: Record<AssignedTaskStatus, string> = {
-  assigned: 'Submit proof',
-  rejected: 'Resubmit',
-  submitted: 'View submission',
-  approved: 'View task',
+/** The proof you have to produce is the fastest way to recognise a task in a list. */
+const PROOF_ART: Record<ProofType, string> = {
+  screenshot: ART.proof.screenshot,
+  link: ART.proof.link,
+  text: ART.proof.text,
+  username: ART.proof.username,
+  'video-metric': ART.proof.video,
+  file: ART.proof.poster,
 };
+
+type Tone = 'primary' | 'success' | 'warning' | 'error';
 
 interface DueMeta {
   label: string;
@@ -71,152 +93,345 @@ function dueMeta(dueDate: string | null | undefined, status: AssignedTaskStatus)
   return { label, color: 'default' };
 }
 
-/**
- * One task as a single tap target. The whole card is the link — a per-card
- * button block turned the list into a column of identical purple slabs, which
- * made scanning eight tasks harder than it needed to be. Urgency is carried by
- * the points block and the due line, not by shouting at every row.
- */
-function TaskCard({ task }: { task: InternshipTask }) {
-  const due = dueMeta(task.dueDate, task.status);
-  const needsAction = NEEDS_ACTION.includes(task.status);
-  const urgent = due?.color === 'error';
-  const done = task.status === 'approved';
+function greetingFor(hour: number): string {
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
 
+// ── welcome banner ───────────────────────────────────────────────────────
+
+/** One cell of the banner's stat strip; `href` turns the whole cell into a link. */
+function BannerStat({
+  label,
+  children,
+  href,
+}: {
+  label: string;
+  children: React.ReactNode;
+  href?: string;
+}) {
+  const body = (
+    <>
+      <Typography
+        sx={{
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: '0.12em',
+          textTransform: 'uppercase',
+          color: 'rgba(255,255,255,0.6)',
+        }}
+      >
+        {label}
+      </Typography>
+      <Typography
+        className="tnum"
+        noWrap
+        sx={{ fontWeight: 800, fontSize: { xs: 16, sm: 18 }, lineHeight: 1.3, mt: 0.25 }}
+      >
+        {children}
+      </Typography>
+    </>
+  );
+
+  if (!href) return <Box sx={{ flex: 1, minWidth: 0 }}>{body}</Box>;
   return (
-    <Card
+    <Box
+      component={Link}
+      href={href}
       sx={{
-        overflow: 'hidden',
-        transition: (t) =>
-          t.transitions.create(['box-shadow', 'transform', 'border-color'], { duration: 200 }),
-        '&:hover': {
-          transform: { md: 'translateY(-2px)' },
-          borderColor: 'primary.light',
-          boxShadow: (t) => t.customShadows.cardHover,
-        },
-        // A rejected task is the one thing the intern must come back to.
-        ...(task.status === 'rejected' && { borderColor: 'error.light' }),
+        flex: 1,
+        minWidth: 0,
+        color: 'inherit',
+        textDecoration: 'none',
+        borderRadius: 1.5,
+        transition: 'opacity .2s ease',
+        '&:hover': { opacity: 0.82 },
       }}
     >
-      <CardActionArea component={Link} href={`/tasks/${task._id}`} sx={{ p: { xs: 2, sm: 2.5 } }}>
-        <Stack direction="row" spacing={2} alignItems="flex-start">
-          {/* Points block — the reward is the reason to tap, so it leads. */}
-          <Stack
-            alignItems="center"
-            justifyContent="center"
-            sx={{
-              flexShrink: 0,
-              width: 56,
-              height: 56,
-              borderRadius: 2.5,
-              bgcolor: done ? 'success.lighter' : urgent ? 'error.lighter' : 'primary.lighter',
-              color: done ? 'success.darker' : urgent ? 'error.darker' : 'primary.dark',
-            }}
-          >
-            <Typography className="tnum" sx={{ fontWeight: 800, fontSize: 18, lineHeight: 1 }}>
-              {task.points}
-            </Typography>
-            <Typography sx={{ fontSize: 10, fontWeight: 600, opacity: 0.8, mt: 0.25 }}>
-              pts
-            </Typography>
-          </Stack>
+      {body}
+    </Box>
+  );
+}
 
-          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-            <Stack direction="row" spacing={1} alignItems="flex-start">
-              <Typography
-                variant="subtitle1"
-                sx={{ fontWeight: 700, flexGrow: 1, minWidth: 0, pr: 0.5 }}
-              >
-                {task.title}
-              </Typography>
-              <StatusChip status={task.status} />
-            </Stack>
+/**
+ * The violet welcome band — greeting, the one big display name, and the
+ * mandatory-completion ring. Everything on it is either the intern's own name
+ * or a number straight off /internship/me and /internship/tasks.
+ */
+function WelcomeBanner({
+  profile,
+  approvedMandatory,
+  totalMandatory,
+  toDo,
+  hasDailyTask,
+}: {
+  profile: InternProfile;
+  approvedMandatory: number;
+  totalMandatory: number;
+  toDo: number;
+  hasDailyTask: boolean;
+}) {
+  const firstName = profile.fullName ? profile.fullName.trim().split(' ')[0] : null;
+  const greeting = greetingFor(new Date().getHours());
+  const pct = totalMandatory ? (approvedMandatory / totalMandatory) * 100 : 0;
 
-            {task.description && (
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{
-                  mt: 0.5,
-                  display: '-webkit-box',
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: 'vertical',
-                  overflow: 'hidden',
-                }}
-              >
-                {task.description}
-              </Typography>
-            )}
+  return (
+    <Box
+      sx={{
+        position: 'relative',
+        overflow: 'hidden',
+        borderRadius: 3,
+        p: { xs: 2.5, sm: 3 },
+        color: 'common.white',
+        background: (t) =>
+          `linear-gradient(135deg, ${t.palette.primary.main} 0%, ${t.palette.primary.dark} 52%, ${t.palette.primary.darker} 100%)`,
+        boxShadow: (t) => t.customShadows.primary,
+      }}
+    >
+      {/* Decorative bokeh — the website's dashboard welcome-banner treatment. */}
+      <Box
+        aria-hidden
+        sx={{
+          position: 'absolute',
+          width: 240,
+          height: 240,
+          borderRadius: '50%',
+          bgcolor: 'rgba(255,255,255,0.07)',
+          top: -110,
+          right: -70,
+        }}
+      />
+      <Box
+        aria-hidden
+        sx={{
+          position: 'absolute',
+          width: 150,
+          height: 150,
+          borderRadius: '50%',
+          bgcolor: 'rgba(255,255,255,0.05)',
+          bottom: -84,
+          right: 90,
+        }}
+      />
+      <Box
+        aria-hidden
+        sx={{
+          position: 'absolute',
+          width: 110,
+          height: 110,
+          borderRadius: '50%',
+          bgcolor: 'rgba(245,166,35,0.12)',
+          top: 30,
+          left: -52,
+        }}
+      />
 
-            {/* Meta as quiet text with dot separators — chips here competed
-                with the status chip for attention. */}
-            <Stack
-              direction="row"
-              alignItems="center"
-              sx={{ mt: 1.25, gap: 1, flexWrap: 'wrap', typography: 'caption' }}
+      <Box sx={{ position: 'relative' }}>
+        <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between">
+          <Box sx={{ minWidth: 0 }}>
+            <Typography sx={{ ...EYEBROW, color: 'rgba(255,255,255,0.62)' }}>{greeting}</Typography>
+            <Typography
+              sx={{
+                fontFamily: FONT_DISPLAY,
+                fontWeight: 600,
+                fontSize: { xs: 30, sm: 40 },
+                lineHeight: 1.1,
+                mt: 0.5,
+                wordBreak: 'break-word',
+              }}
             >
-              {due && (
-                <Stack direction="row" spacing={0.5} alignItems="center">
-                  {due.color === 'default' ? (
-                    <EventIcon sx={{ fontSize: 15, color: 'text.disabled' }} />
-                  ) : (
-                    <PriorityHighIcon sx={{ fontSize: 15, color: `${due.color}.main` }} />
-                  )}
-                  <Box
-                    component="span"
-                    sx={{
-                      color: due.color === 'default' ? 'text.secondary' : `${due.color}.dark`,
-                      fontWeight: due.color === 'default' ? 500 : 700,
-                    }}
-                  >
-                    {due.label}
-                  </Box>
-                </Stack>
-              )}
-              {task.cadence === 'daily-streak' && (
-                <>
-                  {due && <Box component="span" sx={{ color: 'text.disabled' }}>·</Box>}
-                  <Box component="span" sx={{ color: 'text.secondary' }}>Daily streak</Box>
-                </>
-              )}
-              {done && (task.pointsAwarded ?? 0) > 0 && (
-                <>
-                  {(due || task.cadence === 'daily-streak') && (
-                    <Box component="span" sx={{ color: 'text.disabled' }}>·</Box>
-                  )}
-                  <Box component="span" sx={{ color: 'success.dark', fontWeight: 700 }}>
-                    {task.pointsAwarded} pts added
-                  </Box>
-                </>
-              )}
-            </Stack>
-
-            {task.status === 'rejected' && task.rejectionReason && (
-              <Box
-                sx={{
-                  mt: 1.5,
-                  px: 1.5,
-                  py: 1,
-                  borderRadius: 1.5,
-                  bgcolor: 'error.lighter',
-                  color: 'error.darker',
-                }}
-              >
-                <Typography variant="caption" sx={{ fontWeight: 700, display: 'block' }}>
-                  Needs another try
-                </Typography>
-                <Typography variant="caption">{task.rejectionReason}</Typography>
+              {firstName ?? 'Welcome back'}
+            </Typography>
+            <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.74)', mt: 0.75 }}>
+              {toDo > 0
+                ? `${toDo} task${toDo === 1 ? '' : 's'} waiting on you`
+                : totalMandatory > 0
+                  ? 'Nothing is waiting on you right now'
+                  : 'No tasks assigned yet'}
+            </Typography>
+            {hasDailyTask && (
+              <Box sx={{ ...GLASS_PILL_SX, mt: 1.5 }}>
+                <Art src={ART.streak.flame} size={18} />
+                Daily task
               </Box>
             )}
           </Box>
 
-          <ChevronRightRoundedIcon
+          {totalMandatory > 0 ? (
+            <ProgressRing
+              value={pct}
+              size={92}
+              thickness={7}
+              color="#F5A623"
+              trackColor="rgba(255,255,255,0.2)"
+              ariaLabel={`${approvedMandatory} of ${totalMandatory} required tasks approved`}
+            >
+              <Box sx={{ color: 'text.primary' }}>
+                <Typography className="tnum" sx={{ fontWeight: 800, fontSize: 19, lineHeight: 1 }}>
+                  {approvedMandatory}/{totalMandatory}
+                </Typography>
+                <Typography
+                  sx={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', opacity: 0.6 }}
+                >
+                  DONE
+                </Typography>
+              </Box>
+            </ProgressRing>
+          ) : (
+            <Art src={ART.mascot.wave} size={{ xs: 72, sm: 88 }} />
+          )}
+        </Stack>
+
+        <Divider sx={{ my: 2, borderColor: 'rgba(255,255,255,0.16)' }} />
+
+        <Stack
+          direction="row"
+          spacing={2}
+          divider={
+            <Divider orientation="vertical" flexItem sx={{ borderColor: 'rgba(255,255,255,0.16)' }} />
+          }
+        >
+          <BannerStat label="Points" href="/points">
+            <CountUp value={profile.pointsBalance} />
+          </BannerStat>
+          <BannerStat label="To do">{toDo}</BannerStat>
+          <BannerStat label="Track">
+            {profile.track ? TRACK_LABELS[profile.track] : 'Pending'}
+          </BannerStat>
+        </Stack>
+      </Box>
+    </Box>
+  );
+}
+
+// ── task rows ────────────────────────────────────────────────────────────
+
+/**
+ * One task as a single tap target. A compact row rather than a slab: the proof
+ * art says what kind of work it is, the meta line says when and how much, and
+ * the state lives in a 3px rail instead of a shouting block, so a list of eight
+ * stays scannable on a 390px screen.
+ */
+function TaskRow({ task }: { task: InternshipTask }) {
+  const due = dueMeta(task.dueDate, task.status);
+  const done = task.status === 'approved';
+  const rejected = task.status === 'rejected';
+  const overdue = due?.color === 'error';
+
+  const rail: 'warning' | 'error' | null = rejected ? 'error' : overdue ? 'warning' : null;
+  const tone: Tone = done ? 'success' : rejected ? 'error' : overdue ? 'warning' : 'primary';
+  const attempts = task.submissionCount;
+
+  return (
+    <Card
+      sx={{
+        position: 'relative',
+        overflow: 'hidden',
+        ...(done && { bgcolor: (t) => alpha(t.palette.success.main, 0.06) }),
+        transition: 'transform .25s ease, box-shadow .25s ease, border-color .25s ease',
+        '&:hover': {
+          transform: { md: 'translateY(-3px)' },
+          borderColor: (t) => t.palette[tone].main,
+          boxShadow: (t) => `0 18px 36px -24px ${alpha(t.palette[tone].main, 0.75)}`,
+        },
+        ...(rail && {
+          '&::before': {
+            content: '""',
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 3,
+            bgcolor: `${rail}.main`,
+            zIndex: 1,
+          },
+        }),
+      }}
+    >
+      <CardActionArea component={Link} href={`/tasks/${task._id}`} sx={{ p: { xs: 1.75, sm: 2 } }}>
+        <Stack direction="row" spacing={1.75} alignItems="center">
+          <Box
             sx={{
-              display: { xs: 'none', sm: 'block' },
-              alignSelf: 'center',
-              color: needsAction ? 'primary.main' : 'text.disabled',
+              flexShrink: 0,
+              width: 48,
+              height: 48,
+              borderRadius: 2,
+              display: 'grid',
+              placeItems: 'center',
+              bgcolor: `${tone}.lighter`,
             }}
-          />
+          >
+            <Art src={PROOF_ART[task.proofType] ?? ART.proof.text} size={32} />
+          </Box>
+
+          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+            <Typography
+              variant="subtitle1"
+              sx={{
+                fontWeight: 600,
+                lineHeight: 1.35,
+                display: '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical',
+                overflow: 'hidden',
+              }}
+            >
+              {task.title}
+            </Typography>
+
+            {rejected && task.rejectionReason && (
+              <Typography
+                variant="caption"
+                noWrap
+                title={task.rejectionReason}
+                sx={{ display: 'block', color: 'error.main', fontWeight: 600, mt: 0.25 }}
+              >
+                {task.rejectionReason}
+              </Typography>
+            )}
+
+            <MetaLine
+              sx={{ mt: 0.5 }}
+              parts={[
+                due && (
+                  <Box
+                    component="span"
+                    sx={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 0.25,
+                      color: due.color === 'default' ? 'inherit' : `${due.color}.dark`,
+                      fontWeight: due.color === 'default' ? 400 : 700,
+                    }}
+                  >
+                    {due.color === 'default' ? (
+                      <EventRoundedIcon sx={{ fontSize: 14 }} />
+                    ) : (
+                      <PriorityHighRoundedIcon sx={{ fontSize: 14 }} />
+                    )}
+                    {due.label}
+                  </Box>
+                ),
+                task.cadence === 'daily-streak' && 'Daily task',
+                task.status === 'submitted' && statusLabel('submitted'),
+                done && (task.pointsAwarded ?? 0) > 0 && (
+                  <Box component="span" sx={{ color: 'success.dark', fontWeight: 700 }}>
+                    +{task.pointsAwarded} pts added
+                  </Box>
+                ),
+                attempts > 0 && `${attempts} attempt${attempts === 1 ? '' : 's'}`,
+              ]}
+            />
+          </Box>
+
+          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexShrink: 0 }}>
+            <Label color={done ? 'success' : 'primary'} variant="soft">
+              {task.points} pts
+            </Label>
+            {done && <CheckCircleRoundedIcon sx={{ fontSize: 20, color: 'success.main' }} />}
+            <ChevronRightRoundedIcon sx={{ fontSize: 20, color: 'text.disabled' }} />
+          </Stack>
         </Stack>
       </CardActionArea>
     </Card>
@@ -224,92 +439,76 @@ function TaskCard({ task }: { task: InternshipTask }) {
 }
 
 function TaskSection({
-  title,
+  label,
   caption,
   tasks,
-  tone,
 }: {
-  title: string;
+  label: string;
   caption: string;
   tasks: InternshipTask[];
-  tone: 'primary' | 'muted';
 }) {
+  // An empty section is not worth a dashed box — it just adds a dead slab.
+  if (!tasks.length) return null;
   const outstanding = tasks.filter((t) => NEEDS_ACTION.includes(t.status)).length;
 
   return (
     <Box>
-      {/* Typographic section head — the old filled slab read as a card and
-          competed with the actual task cards below it. */}
-      <Stack direction="row" alignItems="baseline" spacing={1} sx={{ mb: 0.5, px: 0.5 }}>
-        <Typography
-          variant="overline"
-          sx={{ color: tone === 'primary' ? 'primary.main' : 'text.secondary' }}
-        >
-          {title}
-        </Typography>
-        {outstanding > 0 && (
-          <Typography variant="caption" sx={{ color: 'text.disabled', fontWeight: 600 }}>
-            {outstanding} to do
-          </Typography>
-        )}
+      <SectionHead
+        label={label}
+        count={tasks.length}
+        caption={caption}
+        action={
+          outstanding > 0 ? (
+            <Label color="warning" variant="soft">
+              {outstanding} to do
+            </Label>
+          ) : undefined
+        }
+      />
+      <Stack spacing={1.25}>
+        {tasks.map((task, i) => (
+          <Reveal key={task._id} index={i}>
+            <TaskRow task={task} />
+          </Reveal>
+        ))}
       </Stack>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5, px: 0.5 }}>
-        {caption}
-      </Typography>
-
-      {tasks.length === 0 ? (
-        <EmptyState
-          dense
-          title={tone === 'primary' ? 'No required tasks right now' : 'No bonus tasks yet'}
-          description={
-            tone === 'primary'
-              ? 'Nothing mandatory is pending. Check back after the team assigns the next batch.'
-              : 'Optional tasks appear here when the team adds them.'
-          }
-        />
-      ) : (
-        <Stack spacing={1.5}>
-          {tasks.map((task) => (
-            <TaskCard key={task._id} task={task} />
-          ))}
-        </Stack>
-      )}
     </Box>
   );
 }
 
-function TasksHeader({ me }: { me: MeResponse | null }) {
-  const profile = me?.internProfile;
-  if (!profile) return <PageHeader title="My tasks" />;
+/** One line, one label — a paused/completed internship is context, not an alarm. */
+function StatusStrip({ status }: { status: InternProfile['status'] }) {
+  const color: LabelColor = status === 'paused' ? 'warning' : 'info';
+  const line =
+    status === 'paused'
+      ? 'Submissions are closed. Message the team to resume.'
+      : status === 'completed'
+        ? 'Your internship has ended — this is now read-only.'
+        : 'Your internship is not active yet.';
 
-  const firstName = profile.fullName ? profile.fullName.trim().split(' ')[0] : null;
   return (
-    <PageHeader
-      title="My tasks"
-      subtitle={firstName ? `Hi ${firstName} — here is what is on your plate.` : undefined}
-      meta={
-        <>
-          <Chip
-            size="small"
-            color="primary"
-            label={profile.track ? TRACK_LABELS[profile.track] : 'Track pending'}
-            sx={{ fontWeight: 600 }}
-          />
-          <StatusChip status={profile.status} />
-          <Chip
-            size="small"
-            variant="outlined"
-            component={Link}
-            href="/points"
-            clickable
-            label={`${profile.pointsBalance} pts`}
-            sx={{ fontWeight: 600 }}
-          />
-        </>
-      }
-    />
+    <Stack
+      direction="row"
+      spacing={1}
+      alignItems="center"
+      sx={{
+        px: 1.75,
+        py: 1.25,
+        borderRadius: 2,
+        bgcolor: (t) => alpha(t.palette[color].main, 0.08),
+      }}
+    >
+      <Label color={color} variant="soft">
+        {statusLabel(status)}
+      </Label>
+      <Typography variant="body2" color="text.secondary" sx={{ minWidth: 0 }}>
+        {line}
+      </Typography>
+    </Stack>
   );
 }
+
+// ── screen ───────────────────────────────────────────────────────────────
 
 function TasksScreen() {
   const router = useRouter();
@@ -343,6 +542,28 @@ function TasksScreen() {
     if (needsOnboarding) router.replace('/onboarding');
   }, [needsOnboarding, router]);
 
+  const mandatory = useMemo(() => tasks?.mandatory ?? [], [tasks]);
+  const optional = useMemo(() => tasks?.optional ?? [], [tasks]);
+
+  const stats = useMemo(() => {
+    const all = [...mandatory, ...optional];
+    const approvedMandatory = mandatory.filter((t) => t.status === 'approved').length;
+    return {
+      approvedMandatory,
+      totalMandatory: mandatory.length,
+      toDo: all.filter((t) => NEEDS_ACTION.includes(t.status)).length,
+      hasDailyTask: all.some((t) => t.cadence === 'daily-streak'),
+      // "All done" means the mandatory set is complete AND nothing anywhere is
+      // still open or in review.
+      allDone: mandatory.length > 0 && all.every((t) => t.status === 'approved'),
+    };
+  }, [mandatory, optional]);
+
+  const profileId = profile?._id;
+  useEffect(() => {
+    if (stats.allDone && profileId) celebrateOnce(`tasks-all-done-${profileId}`);
+  }, [stats.allDone, profileId]);
+
   const renderBody = () => {
     if (loading) return <Loading label="Loading your tasks…" skeletonRows={3} />;
     if (error) return <ErrorState error={error} onRetry={load} />;
@@ -375,60 +596,76 @@ function TasksScreen() {
 
     if (needsOnboarding) return <Loading label="Taking you to onboarding…" />;
 
-    const mandatory = tasks?.mandatory ?? [];
-    const optional = tasks?.optional ?? [];
-
-    if (!mandatory.length && !optional.length) {
-      return (
-        <EmptyState
-          icon={<AssignmentTurnedInIcon />}
-          title="No tasks assigned yet"
-          description="Your first tasks land here as soon as the team assigns them. Meanwhile, make sure your handles are up to date so your proof can be verified."
-          action={
-            <Button component={Link} href="/onboarding" variant="contained">
-              Check my profile
-            </Button>
-          }
-        />
-      );
-    }
-
     return (
       <Stack spacing={3}>
-        {profile.status !== 'active' && (
-          <Alert severity={profile.status === 'paused' ? 'warning' : 'info'}>
-            {profile.status === 'paused'
-              ? 'Your internship is paused, so submissions are closed. Message the team to resume.'
-              : profile.status === 'completed'
-                ? 'Your internship has ended — this is now read-only.'
-                : 'Your internship is not active yet.'}
-          </Alert>
+        <WelcomeBanner
+          profile={profile}
+          approvedMandatory={stats.approvedMandatory}
+          totalMandatory={stats.totalMandatory}
+          toDo={stats.toDo}
+          hasDailyTask={stats.hasDailyTask}
+        />
+
+        {profile.status !== 'active' && <StatusStrip status={profile.status} />}
+
+        {!mandatory.length && !optional.length ? (
+          <EmptyState
+            art={ART.mascot.sleeping}
+            title="Nothing here yet"
+            description="Your first tasks land here as soon as the team assigns them. Meanwhile, make sure your handles are up to date so your proof can be verified."
+            action={
+              <Button component={Link} href="/onboarding" variant="contained">
+                Check my profile
+              </Button>
+            }
+          />
+        ) : (
+          <>
+            {stats.allDone && (
+              <Card sx={{ bgcolor: (t) => alpha(t.palette.success.main, 0.08) }}>
+                <EmptyState
+                  bare
+                  art={ART.empty.allDone}
+                  title="Every task approved"
+                  description="Nothing is pending. New tasks land here the moment the team assigns them."
+                />
+              </Card>
+            )}
+
+            <TaskSection
+              label="Required tasks"
+              caption="These decide your stipend and certificate. Do these first."
+              tasks={mandatory}
+            />
+
+            <TaskSection
+              label="Bonus tasks"
+              caption="Optional — extra points on top of your required work."
+              tasks={optional}
+            />
+          </>
         )}
 
-        <TaskSection
-          title="Required tasks"
-          caption="These decide your stipend and certificate. Do these first."
-          tasks={mandatory}
-          tone="primary"
-        />
-
-        <TaskSection
-          title="Bonus tasks"
-          caption="Optional — extra points on top of your required work."
-          tasks={optional}
-          tone="muted"
-        />
-
-        <Button component={Link} href="/onboarding" variant="text" size="small">
+        <Button
+          component={Link}
+          href="/onboarding"
+          variant="text"
+          size="small"
+          sx={{ alignSelf: 'flex-start' }}
+        >
           Update my track details and handles
         </Button>
       </Stack>
     );
   };
 
+  // The violet band is the page title for an enrolled intern; everyone else
+  // (loading, admin, not-enrolled) still needs a plain heading.
+  const showPlainHeader = !profile || needsOnboarding;
+
   return (
     <>
-      <TasksHeader me={me} />
+      {showPlainHeader && <PageHeader title="My tasks" />}
       {renderBody()}
     </>
   );

@@ -9,7 +9,6 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import Checkbox from '@mui/material/Checkbox';
-import Chip from '@mui/material/Chip';
 import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
@@ -25,11 +24,21 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import CardGiftcardIcon from '@mui/icons-material/CardGiftcard';
 import EditIcon from '@mui/icons-material/Edit';
+import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
+import FactCheckIcon from '@mui/icons-material/FactCheck';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import SavingsIcon from '@mui/icons-material/Savings';
 import TuneIcon from '@mui/icons-material/Tune';
 import { DataState, errorMessage, Loading } from '@/components/DataStates';
 import EligibilityChecklist from '@/components/EligibilityChecklist';
-import StatusChip from '@/components/StatusChip';
+import EmptyState from '@/components/EmptyState';
+import Label, { type LabelColor } from '@/components/Label';
+import MetaLine from '@/components/MetaLine';
+import Reveal from '@/components/Reveal';
+import SectionHead from '@/components/SectionHead';
+import StatCard from '@/components/StatCard';
+import { statusLabel, statusMeta } from '@/components/StatusChip';
+import { ART } from '@/lib/art';
 import {
   adjustPoints,
   getIntern,
@@ -92,27 +101,17 @@ interface EligRow {
   period?: string | null;
 }
 
-/** Quiet caption line — dates, counts, notes, middot separated. */
-function MetaLine({ items }: { items: React.ReactNode[] }) {
-  const parts = items.filter(Boolean);
-  if (!parts.length) return null;
+/** StatusChip's colour map, reused for the quieter Label pill. */
+function statusTone(status: string): LabelColor {
+  return (statusMeta(status).color ?? 'default') as LabelColor;
+}
+
+/** Status as a soft Label — reads as data, where a Chip reads as a button. */
+function StatusLabel({ status }: { status: string }) {
   return (
-    <Stack
-      direction="row"
-      alignItems="center"
-      sx={{ gap: 0.75, flexWrap: 'wrap', typography: 'caption', color: 'text.secondary' }}
-    >
-      {parts.map((part, i) => (
-        <React.Fragment key={i}>
-          {i > 0 && (
-            <Box component="span" sx={{ color: 'text.disabled' }}>
-              ·
-            </Box>
-          )}
-          {part}
-        </React.Fragment>
-      ))}
-    </Stack>
+    <Label color={statusTone(status)} variant="soft">
+      {statusLabel(status)}
+    </Label>
   );
 }
 
@@ -129,41 +128,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <Typography variant="body2" sx={{ fontWeight: 600, wordBreak: 'break-word' }}>
         {children}
       </Typography>
-    </Box>
-  );
-}
-
-/** Section head — typographic, never a filled slab above the cards. */
-function SectionHead({
-  title,
-  count,
-  caption,
-}: {
-  title: string;
-  count?: number;
-  caption?: string;
-}) {
-  return (
-    <Box sx={{ mb: 1.25, px: 0.5 }}>
-      <Stack direction="row" alignItems="baseline" spacing={1}>
-        <Typography variant="overline" sx={{ color: 'text.secondary' }}>
-          {title}
-        </Typography>
-        {typeof count === 'number' && count > 0 && (
-          <Typography
-            className="tnum"
-            variant="caption"
-            sx={{ color: 'text.disabled', fontWeight: 600 }}
-          >
-            {fmtNumber(count)}
-          </Typography>
-        )}
-      </Stack>
-      {caption && (
-        <Typography variant="caption" color="text.secondary">
-          {caption}
-        </Typography>
-      )}
     </Box>
   );
 }
@@ -225,7 +189,10 @@ function ProfileTab({ detail, programs }: { detail: InternDetail; programs: Prog
   return (
     <Stack spacing={3}>
       <Box>
-        <SectionHead title="Profile" caption="What the team recorded when this intern was enrolled." />
+        <SectionHead
+          label="Profile"
+          caption="What the team recorded when this intern was enrolled."
+        />
         <Card sx={{ p: { xs: 2, sm: 2.5 } }}>
           <Grid container spacing={2.5}>
             <Grid size={{ xs: 12, sm: 6 }}>
@@ -255,7 +222,7 @@ function ProfileTab({ detail, programs }: { detail: InternDetail; programs: Prog
                   Social handles
                 </Typography>
                 <MetaLine
-                  items={handleRows.map(([platform, handle]) => (
+                  parts={handleRows.map(([platform, handle]) => (
                     <Box key={platform} component="span">
                       <Box component="span" sx={{ color: 'text.disabled' }}>
                         {titleCase(platform)}{' '}
@@ -288,48 +255,49 @@ function ProfileTab({ detail, programs }: { detail: InternDetail; programs: Prog
       {videos.length > 0 && (
         <Box>
           <SectionHead
-            title="Video submissions"
+            label="Video submissions"
             count={videos.length}
             caption="Most recent first. Metrics lock 30 days after posting."
           />
           <RowCard>
-            {videos.slice(0, 10).map((v) => (
-              <Stack
-                key={v._id}
-                direction="row"
-                spacing={1.5}
-                alignItems="flex-start"
-                sx={{ p: { xs: 1.75, sm: 2 } }}
-              >
-                <Box sx={{ minWidth: 0, flexGrow: 1 }}>
-                  <MuiLink
-                    href={v.videoUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    variant="body2"
-                    sx={{ fontWeight: 600, wordBreak: 'break-all' }}
-                  >
-                    {v.videoUrl}
-                  </MuiLink>
-                  <MetaLine
-                    items={[
-                      titleCase(v.platform),
-                      `posted ${fmtDate(v.postedAt)}`,
-                      v.views30d !== null ? (
-                        <Box component="span" className="tnum">
-                          {fmtNumber(v.views30d)} views
-                        </Box>
-                      ) : null,
-                      v.lockedTierKey ? (
-                        <Box component="span" sx={{ color: 'success.dark', fontWeight: 700 }}>
-                          tier {v.lockedTierKey}
-                        </Box>
-                      ) : null,
-                    ]}
-                  />
-                </Box>
-                <StatusChip status={v.status} />
-              </Stack>
+            {videos.slice(0, 10).map((v, i) => (
+              <Reveal key={v._id} index={i}>
+                <Stack
+                  direction="row"
+                  spacing={1.5}
+                  alignItems="flex-start"
+                  sx={{ p: { xs: 1.75, sm: 2 } }}
+                >
+                  <Box sx={{ minWidth: 0, flexGrow: 1 }}>
+                    <MuiLink
+                      href={v.videoUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      variant="body2"
+                      sx={{ fontWeight: 600, wordBreak: 'break-all' }}
+                    >
+                      {v.videoUrl}
+                    </MuiLink>
+                    <MetaLine
+                      parts={[
+                        titleCase(v.platform),
+                        `posted ${fmtDate(v.postedAt)}`,
+                        v.views30d !== null ? (
+                          <Box component="span" className="tnum">
+                            {fmtNumber(v.views30d)} views
+                          </Box>
+                        ) : null,
+                        v.lockedTierKey ? (
+                          <Box component="span" sx={{ color: 'success.dark', fontWeight: 700 }}>
+                            tier {v.lockedTierKey}
+                          </Box>
+                        ) : null,
+                      ]}
+                    />
+                  </Box>
+                  <StatusLabel status={v.status} />
+                </Stack>
+              </Reveal>
             ))}
           </RowCard>
         </Box>
@@ -339,16 +307,20 @@ function ProfileTab({ detail, programs }: { detail: InternDetail; programs: Prog
 }
 
 function TasksTab({ tasks }: { tasks: AssignedTask[] }) {
+  if (!tasks.length) {
+    return (
+      <EmptyState
+        art={ART.empty.inbox}
+        title="No tasks assigned"
+        description="Assign work to this intern from the Tasks screen."
+      />
+    );
+  }
   return (
-    <DataState
-      isEmpty={!tasks.length}
-      emptyTitle="No tasks assigned"
-      emptyDescription="Assign work to this intern from the Tasks screen."
-    >
-      <RowCard>
-        {tasks.map((t) => (
+    <RowCard>
+      {tasks.map((t, i) => (
+        <Reveal key={t._id} index={i}>
           <Stack
-            key={t._id}
             direction={{ xs: 'column', sm: 'row' }}
             spacing={1.25}
             alignItems={{ xs: 'flex-start', sm: 'center' }}
@@ -359,7 +331,7 @@ function TasksTab({ tasks }: { tasks: AssignedTask[] }) {
                 {nameOf(t.templateId)}
               </Typography>
               <MetaLine
-                items={[
+                parts={[
                   t.period,
                   t.dueDate ? `due ${fmtDate(t.dueDate)}` : null,
                   `${t.submissionCount} submission${t.submissionCount === 1 ? '' : 's'}`,
@@ -381,37 +353,36 @@ function TasksTab({ tasks }: { tasks: AssignedTask[] }) {
                   +{fmtNumber(t.pointsAwarded)} pts
                 </Typography>
               )}
-              <StatusChip status={t.status} />
+              <StatusLabel status={t.status} />
             </Stack>
           </Stack>
-        ))}
-      </RowCard>
-    </DataState>
+        </Reveal>
+      ))}
+    </RowCard>
   );
 }
 
 function LedgerTab({ entries }: { entries: LedgerEntry[] }) {
+  if (!entries.length) {
+    return (
+      <EmptyState
+        art={ART.empty.ledger}
+        title="No points movement yet"
+        description="Every approval, adjustment and redemption lands here."
+      />
+    );
+  }
   return (
-    <DataState
-      isEmpty={!entries.length}
-      emptyTitle="No points movement yet"
-      emptyDescription="Every approval, adjustment and redemption lands here."
-    >
-      <RowCard>
-        {entries.map((e) => (
-          <Stack
-            key={e._id}
-            direction="row"
-            spacing={1.5}
-            alignItems="flex-start"
-            sx={{ p: { xs: 1.75, sm: 2 } }}
-          >
+    <RowCard>
+      {entries.map((e, i) => (
+        <Reveal key={e._id} index={i}>
+          <Stack direction="row" spacing={1.5} alignItems="flex-start" sx={{ p: { xs: 1.75, sm: 2 } }}>
             <Box sx={{ minWidth: 0, flexGrow: 1 }}>
               <Typography variant="body2" sx={{ fontWeight: 700 }}>
                 {titleCase(e.reason)}
               </Typography>
               <MetaLine
-                items={[
+                parts={[
                   fmtDateTime(e.createdAt),
                   titleCase(e.actorType),
                   e.note ? (
@@ -436,34 +407,33 @@ function LedgerTab({ entries }: { entries: LedgerEntry[] }) {
               </Typography>
             </Stack>
           </Stack>
-        ))}
-      </RowCard>
-    </DataState>
+        </Reveal>
+      ))}
+    </RowCard>
   );
 }
 
 function RedemptionsTab({ redemptions }: { redemptions: Redemption[] }) {
+  if (!redemptions.length) {
+    return (
+      <EmptyState
+        art={ART.empty.rewards}
+        title="Nothing claimed or granted yet"
+        description="Rewards this intern redeems, and anything the team hands them, show up here."
+      />
+    );
+  }
   return (
-    <DataState
-      isEmpty={!redemptions.length}
-      emptyTitle="Nothing claimed or granted yet"
-      emptyDescription="Rewards this intern redeems, and anything the team hands them, show up here."
-    >
-      <RowCard>
-        {redemptions.map((r) => (
-          <Stack
-            key={r._id}
-            direction="row"
-            spacing={1.5}
-            alignItems="flex-start"
-            sx={{ p: { xs: 1.75, sm: 2 } }}
-          >
+    <RowCard>
+      {redemptions.map((r, i) => (
+        <Reveal key={r._id} index={i}>
+          <Stack direction="row" spacing={1.5} alignItems="flex-start" sx={{ p: { xs: 1.75, sm: 2 } }}>
             <Box sx={{ minWidth: 0, flexGrow: 1 }}>
               <Typography variant="body2" sx={{ fontWeight: 700 }}>
                 {nameOf(r.rewardId)}
               </Typography>
               <MetaLine
-                items={[
+                parts={[
                   titleCase(r.source),
                   `requested ${fmtDate(r.requestedAt)}`,
                   r.pointsSpent ? (
@@ -475,11 +445,11 @@ function RedemptionsTab({ redemptions }: { redemptions: Redemption[] }) {
                 ]}
               />
             </Box>
-            <StatusChip status={r.status} />
+            <StatusLabel status={r.status} />
           </Stack>
-        ))}
-      </RowCard>
-    </DataState>
+        </Reveal>
+      ))}
+    </RowCard>
   );
 }
 
@@ -634,6 +604,9 @@ function InternDetailBody({ internId }: { internId: string }) {
 
   const eligibility = normalizeEligibility(d.eligibility ?? []);
   const points = d.points ?? { balance: 0, totalEarned: 0, entries: [], total: 0 };
+  const tasks = d.tasks ?? [];
+  // "Submitted" is the queue state — proof is in, nobody has ruled on it yet.
+  const awaitingReview = tasks.filter((t) => t.status === 'submitted').length;
   const name = internLabel(d.profile);
   const initial = (d.profile.fullName || d.profile.email || '?').trim().charAt(0).toUpperCase();
 
@@ -644,70 +617,56 @@ function InternDetailBody({ internId }: { internId: string }) {
 
   return (
     <Stack spacing={2.5}>
-      {/* Profile header — identity on the left, the balance and the two actions
-          that move money on the right. */}
+      {/* Identity strip: who this is, what state they are in, and the three
+          actions that move points or profile data. Numbers live in the tiles
+          below so the header stays a name, not a dashboard. */}
       <Card sx={{ p: { xs: 2, sm: 2.5 } }}>
-        <Stack
-          direction={{ xs: 'column', sm: 'row' }}
-          spacing={2}
-          justifyContent="space-between"
-          alignItems={{ sm: 'flex-start' }}
-        >
-          <Stack direction="row" spacing={2} sx={{ minWidth: 0 }}>
-            <Avatar
-              sx={{
-                width: 56,
-                height: 56,
-                flexShrink: 0,
-                fontSize: 22,
-                fontWeight: 800,
-                bgcolor: 'primary.lighter',
-                color: 'primary.dark',
-              }}
-            >
-              {initial}
-            </Avatar>
-            <Box sx={{ minWidth: 0 }}>
-              <Typography variant="h6" sx={{ wordBreak: 'break-word' }}>
-                {name}
+        <Stack direction="row" spacing={2} sx={{ minWidth: 0 }}>
+          <Avatar
+            sx={{
+              width: 56,
+              height: 56,
+              flexShrink: 0,
+              fontSize: 22,
+              fontWeight: 800,
+              bgcolor: 'primary.lighter',
+              color: 'primary.dark',
+            }}
+          >
+            {initial}
+          </Avatar>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="h6" sx={{ wordBreak: 'break-word' }}>
+              {name}
+            </Typography>
+            {d.profile.fullName && (
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: 'block', wordBreak: 'break-all' }}
+              >
+                {d.profile.email}
               </Typography>
-              {d.profile.fullName && (
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ display: 'block', wordBreak: 'break-all' }}
-                >
-                  {d.profile.email}
-                </Typography>
+            )}
+            <Stack direction="row" sx={{ mt: 1, gap: 0.75, flexWrap: 'wrap' }}>
+              <StatusLabel status={d.profile.status} />
+              <Label color="default" variant="soft">
+                {titleCase(d.profile.track ?? 'no track')}
+              </Label>
+              {!d.profile.userId && (
+                <Label color="info" variant="outlined">
+                  Not signed in yet
+                </Label>
               )}
-              <Stack direction="row" sx={{ mt: 1, gap: 0.75, flexWrap: 'wrap' }}>
-                <StatusChip status={d.profile.status} />
-                <Chip
-                  size="small"
-                  variant="outlined"
-                  label={titleCase(d.profile.track ?? 'no track')}
-                />
-              </Stack>
-              <Box sx={{ mt: 1 }}>
-                <MetaLine items={[programNames(d.profile.programIds)]} />
-              </Box>
-            </Box>
-          </Stack>
-
-          <Stack alignItems={{ xs: 'flex-start', sm: 'flex-end' }} sx={{ flexShrink: 0 }}>
-            <Typography
-              className="tnum"
-              sx={{ fontSize: 34, fontWeight: 800, lineHeight: 1.05, color: 'primary.main' }}
-            >
-              {fmtNumber(points.balance ?? 0)}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              points balance
-            </Typography>
-            <Typography className="tnum" variant="caption" sx={{ color: 'text.disabled' }}>
-              {fmtNumber(points.totalEarned ?? 0)} earned lifetime
-            </Typography>
-          </Stack>
+            </Stack>
+            <MetaLine
+              sx={{ mt: 1 }}
+              parts={[
+                programNames(d.profile.programIds),
+                d.profile.activatedAt ? `activated ${fmtDate(d.profile.activatedAt)}` : null,
+              ]}
+            />
+          </Box>
         </Stack>
 
         <Divider sx={{ my: 2 }} />
@@ -750,6 +709,37 @@ function InternDetailBody({ internId }: { internId: string }) {
         </Stack>
       </Card>
 
+      <Grid container spacing={2}>
+        <Grid size={{ xs: 12, sm: 4 }}>
+          <StatCard
+            title="Points balance"
+            value={points.balance ?? 0}
+            hint="Spendable right now"
+            icon={<SavingsIcon />}
+            tone="primary"
+          />
+        </Grid>
+        <Grid size={{ xs: 6, sm: 4 }}>
+          <StatCard
+            title="Earned"
+            value={points.totalEarned ?? 0}
+            hint="Lifetime, all approvals"
+            icon={<EmojiEventsIcon />}
+            tone="success"
+          />
+        </Grid>
+        <Grid size={{ xs: 6, sm: 4 }}>
+          <StatCard
+            title="In review"
+            value={awaitingReview}
+            hint="Tasks awaiting a decision"
+            icon={<FactCheckIcon />}
+            tone="warning"
+            href="/admin/verify"
+          />
+        </Grid>
+      </Grid>
+
       <Box>
         <Tabs
           value={tab}
@@ -760,36 +750,38 @@ function InternDetailBody({ internId }: { internId: string }) {
           sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}
         >
           <Tab label="Profile" />
-          <Tab label={`Tasks (${d.tasks?.length ?? 0})`} />
+          <Tab label={`Tasks (${tasks.length})`} />
           <Tab label={`Points (${points.entries?.length ?? 0})`} />
           <Tab label={`Eligibility (${eligibility.length})`} />
           <Tab label={`Redemptions (${d.redemptions?.length ?? 0})`} />
         </Tabs>
 
         {tab === 0 && <ProfileTab detail={d} programs={programList} />}
-        {tab === 1 && <TasksTab tasks={d.tasks ?? []} />}
+        {tab === 1 && <TasksTab tasks={tasks} />}
         {tab === 2 && <LedgerTab entries={points.entries ?? []} />}
-        {tab === 3 && (
-          <DataState
-            isEmpty={!eligibility.length}
-            emptyTitle="No eligibility rules apply"
-            emptyDescription="Create rules on the Eligibility screen to gate stipends and goodies."
-          >
+        {tab === 3 &&
+          (eligibility.length ? (
             <Stack spacing={1.5}>
-              {eligibility.map((row) => (
-                <EligibilityChecklist
-                  key={row.key}
-                  status={row.status}
-                  progress={row.progress}
-                  reason={row.reason}
-                  rewardName={row.rewardName}
-                  ruleName={row.ruleName}
-                  period={row.period}
-                />
+              {eligibility.map((row, i) => (
+                <Reveal key={row.key} index={i}>
+                  <EligibilityChecklist
+                    status={row.status}
+                    progress={row.progress}
+                    reason={row.reason}
+                    rewardName={row.rewardName}
+                    ruleName={row.ruleName}
+                    period={row.period}
+                  />
+                </Reveal>
               ))}
             </Stack>
-          </DataState>
-        )}
+          ) : (
+            <EmptyState
+              art={ART.eligibility.hourglass}
+              title="No eligibility rules apply"
+              description="Create rules on the Eligibility screen to gate stipends and goodies."
+            />
+          ))}
         {tab === 4 && <RedemptionsTab redemptions={d.redemptions ?? []} />}
       </Box>
 

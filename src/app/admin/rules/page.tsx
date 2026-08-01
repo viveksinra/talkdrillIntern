@@ -6,7 +6,6 @@ import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
-import Chip from '@mui/material/Chip';
 import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
@@ -31,6 +30,11 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { DataState, errorMessage } from '@/components/DataStates';
 import EligibilityChecklist from '@/components/EligibilityChecklist';
+import EmptyState from '@/components/EmptyState';
+import Label from '@/components/Label';
+import MetaLine from '@/components/MetaLine';
+import SectionHead from '@/components/SectionHead';
+import { ART } from '@/lib/art';
 import {
   createRule,
   deleteRule,
@@ -226,67 +230,13 @@ function conditionSummary(c: EligibilityCondition): string {
   }
 }
 
-/** Quiet caption line, middot separated. */
-function MetaLine({ items }: { items: React.ReactNode[] }) {
-  const parts = items.filter(Boolean);
-  if (!parts.length) return null;
-  return (
-    <Stack
-      direction="row"
-      alignItems="center"
-      sx={{ gap: 0.75, flexWrap: 'wrap', typography: 'caption', color: 'text.secondary' }}
-    >
-      {parts.map((part, i) => (
-        <React.Fragment key={i}>
-          {i > 0 && (
-            <Box component="span" sx={{ color: 'text.disabled' }}>
-              ·
-            </Box>
-          )}
-          {part}
-        </React.Fragment>
-      ))}
-    </Stack>
-  );
-}
-
-/** Typographic section head. */
-function SectionHead({
-  title,
-  count,
-  caption,
-  action,
-}: {
-  title: string;
-  count?: number;
-  caption?: string;
-  action?: React.ReactNode;
-}) {
-  return (
-    <Box sx={{ mb: 1.25, px: 0.5 }}>
-      <Stack direction="row" alignItems="center" spacing={1}>
-        <Typography variant="overline" sx={{ color: 'primary.main' }}>
-          {title}
-        </Typography>
-        {typeof count === 'number' && (
-          <Typography
-            className="tnum"
-            variant="caption"
-            sx={{ color: 'text.disabled', fontWeight: 600 }}
-          >
-            {fmtNumber(count)}
-          </Typography>
-        )}
-        <Box sx={{ flexGrow: 1 }} />
-        {action}
-      </Stack>
-      {caption && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-          {caption}
-        </Typography>
-      )}
-    </Box>
-  );
+/** "2026-08" → "Aug 2026". Left as-is if it is not a period string. */
+function fmtPeriod(period?: string | null): string {
+  if (!period) return '';
+  const m = /^(\d{4})-(\d{2})$/.exec(period);
+  if (!m) return period;
+  const date = new Date(Number(m[1]), Number(m[2]) - 1, 1);
+  return date.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
 }
 
 /** Inline number box inside a condition sentence. */
@@ -548,7 +498,7 @@ function RulesTab() {
     <Stack spacing={2}>
       <Box>
         <SectionHead
-          title="Stipend rules"
+          label="Stipend rules"
           count={rows.length}
           caption="Each rule ties one reward to the conditions that unlock it."
           action={
@@ -562,51 +512,53 @@ function RulesTab() {
           loading={rules.loading && !rules.data}
           error={rules.error && !rules.data ? rules.error : undefined}
           onRetry={rules.reload}
-          isEmpty={!rows.length}
-          emptyTitle="No stipend rules yet"
-          emptyDescription="A rule ties a reward to conditions — for example: all mandatory tasks approved this month unlocks the stipend."
-          emptyAction={
-            <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
-              New rule
-            </Button>
-          }
           skeletonRows={2}
         >
-          <Stack spacing={2}>
-            {rows.map((rule) => (
-              <Card
-                key={rule._id}
-                sx={{
-                  opacity: rule.isActive === false ? 0.72 : 1,
-                  transition: (t) =>
-                    t.transitions.create(['box-shadow', 'border-color'], { duration: 200 }),
-                  '&:hover': {
-                    borderColor: 'primary.light',
-                    boxShadow: (t) => t.customShadows.cardHover,
-                  },
-                }}
-              >
-                <Box sx={{ p: { xs: 2, sm: 2.5 } }}>
-                  <Stack direction="row" spacing={1.5} justifyContent="space-between" alignItems="flex-start">
-                    <Box sx={{ minWidth: 0 }}>
-                      <Typography variant="subtitle1" sx={{ fontWeight: 700, wordBreak: 'break-word' }}>
-                        {rule.name}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Unlocks {nameOf(rule.rewardId)}
-                      </Typography>
-                    </Box>
-                    <Stack direction="row" spacing={0.75} sx={{ flexShrink: 0 }}>
-                      {rule.autoGrant && <Chip size="small" color="primary" label="Auto-grant" />}
-                      {rule.isActive === false && (
-                        <Chip size="small" variant="outlined" label="Inactive" />
-                      )}
+          {rows.length === 0 ? (
+            <EmptyState
+              art={ART.empty.inbox}
+              title="No stipend rules yet"
+              description="A rule ties a reward to conditions — for example: all mandatory tasks approved this month unlocks the stipend."
+              action={
+                <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+                  New rule
+                </Button>
+              }
+            />
+          ) : (
+            <Stack spacing={2}>
+              {rows.map((rule) => (
+                <Card
+                  key={rule._id}
+                  sx={{
+                    opacity: rule.isActive === false ? 0.72 : 1,
+                    transition: (t) =>
+                      t.transitions.create(['box-shadow', 'border-color'], { duration: 200 }),
+                    '&:hover': {
+                      borderColor: 'primary.light',
+                      boxShadow: (t) => t.customShadows.cardHover,
+                    },
+                  }}
+                >
+                  <Box sx={{ p: { xs: 2, sm: 2.5 } }}>
+                    <Stack direction="row" spacing={1.5} justifyContent="space-between" alignItems="flex-start">
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 700, wordBreak: 'break-word' }}>
+                          {rule.name}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Unlocks {nameOf(rule.rewardId)}
+                        </Typography>
+                      </Box>
+                      <Stack direction="row" spacing={0.75} sx={{ flexShrink: 0 }}>
+                        {rule.autoGrant && <Label color="primary">Auto-grant</Label>}
+                        {rule.isActive === false && <Label color="default">Inactive</Label>}
+                      </Stack>
                     </Stack>
-                  </Stack>
 
-                  <Box sx={{ mt: 1 }}>
                     <MetaLine
-                      items={[
+                      sx={{ mt: 1, rowGap: 0.5 }}
+                      parts={[
                         titleCase(rule.period),
                         rule.period === 'multi-month' ? `${rule.windowMonths}-month window` : null,
                         titleCase(rule.track ?? 'any track'),
@@ -614,53 +566,53 @@ function RulesTab() {
                         `priority ${rule.priority ?? 0}`,
                       ]}
                     />
+
+                    <Stack spacing={0.75} sx={{ mt: 1.75 }}>
+                      {(rule.conditions ?? []).map((c, i) => (
+                        <Stack key={`${c.type}-${i}`} direction="row" spacing={1.25} alignItems="flex-start">
+                          <Box
+                            sx={{
+                              mt: '7px',
+                              width: 6,
+                              height: 6,
+                              borderRadius: '50%',
+                              bgcolor: 'primary.main',
+                              flexShrink: 0,
+                            }}
+                          />
+                          <Typography variant="body2">
+                            {conditionSummary(c)}
+                            {c.label && (
+                              <Box component="span" sx={{ color: 'text.secondary' }}>
+                                {' '}
+                                — shown as “{c.label}”
+                              </Box>
+                            )}
+                          </Typography>
+                        </Stack>
+                      ))}
+                    </Stack>
                   </Box>
 
-                  <Stack spacing={0.75} sx={{ mt: 1.75 }}>
-                    {(rule.conditions ?? []).map((c, i) => (
-                      <Stack key={`${c.type}-${i}`} direction="row" spacing={1.25} alignItems="flex-start">
-                        <Box
-                          sx={{
-                            mt: '7px',
-                            width: 6,
-                            height: 6,
-                            borderRadius: '50%',
-                            bgcolor: 'primary.main',
-                            flexShrink: 0,
-                          }}
-                        />
-                        <Typography variant="body2">
-                          {conditionSummary(c)}
-                          {c.label && (
-                            <Box component="span" sx={{ color: 'text.secondary' }}>
-                              {' '}
-                              — shown as “{c.label}”
-                            </Box>
-                          )}
-                        </Typography>
-                      </Stack>
-                    ))}
+                  <Divider />
+                  <Stack direction="row" spacing={1} sx={{ p: 1.5 }}>
+                    <Button size="small" startIcon={<EditIcon />} onClick={() => openEdit(rule)}>
+                      Edit
+                    </Button>
+                    <Box sx={{ flexGrow: 1 }} />
+                    <Button
+                      size="small"
+                      color="error"
+                      startIcon={<DeleteOutlineIcon />}
+                      onClick={() => setDeleting(rule)}
+                    >
+                      Delete
+                    </Button>
                   </Stack>
-                </Box>
-
-                <Divider />
-                <Stack direction="row" spacing={1} sx={{ p: 1.5 }}>
-                  <Button size="small" startIcon={<EditIcon />} onClick={() => openEdit(rule)}>
-                    Edit
-                  </Button>
-                  <Box sx={{ flexGrow: 1 }} />
-                  <Button
-                    size="small"
-                    color="error"
-                    startIcon={<DeleteOutlineIcon />}
-                    onClick={() => setDeleting(rule)}
-                  >
-                    Delete
-                  </Button>
-                </Stack>
-              </Card>
-            ))}
-          </Stack>
+                </Card>
+              ))}
+            </Stack>
+          )}
         </DataState>
       </Box>
 
@@ -879,7 +831,9 @@ function BoardTab() {
     setRecomputing(true);
     try {
       const result = await recomputeEligibility({ programId: programId || undefined, period });
-      show(`Recomputed ${result.internsProcessed} intern(s) for ${result.period || period}`);
+      show(
+        `Recomputed ${result.internsProcessed} intern(s) for ${fmtPeriod(result.period || period)}`
+      );
       board.reload();
     } catch (err) {
       show(errorMessage(err, 'Recompute failed'), 'error');
@@ -921,11 +875,11 @@ function BoardTab() {
           label="Period"
           value={period}
           onChange={(e) => setPeriod(e.target.value)}
-          sx={{ minWidth: { sm: 140 } }}
+          sx={{ minWidth: { sm: 160 } }}
         >
           {recentPeriods(12).map((p) => (
             <MenuItem key={p} value={p}>
-              {p}
+              {fmtPeriod(p)}
             </MenuItem>
           ))}
         </TextField>
@@ -958,7 +912,7 @@ function BoardTab() {
 
       <Box>
         <SectionHead
-          title="Interns this period"
+          label={`Interns · ${fmtPeriod(period)}`}
           count={rows.length}
           caption="Each card shows every rule that applies, with the numbers behind the verdict."
         />
@@ -967,99 +921,104 @@ function BoardTab() {
           loading={board.loading && !board.data}
           error={board.error && !board.data ? board.error : undefined}
           onRetry={board.reload}
-          isEmpty={!rows.length}
-          emptyTitle="No interns evaluated"
-          emptyDescription="Either the batch has no interns, or no rule applies to them yet. Recompute to refresh."
           skeletonRows={3}
         >
-          <Stack spacing={2}>
-            {rows.map((row) => {
-              const statuses = (row.statuses ?? []) as EvaluationRow[];
-              return (
-                <Card key={row.internProfileId}>
-                  <Box sx={{ p: { xs: 2, sm: 2.5 } }}>
-                    <Box sx={{ minWidth: 0 }}>
-                      <Typography
-                        component={Link}
-                        href={`/admin/interns/${row.internProfileId}`}
-                        variant="subtitle2"
-                        sx={{
-                          fontWeight: 700,
-                          color: 'primary.main',
-                          textDecoration: 'none',
-                          wordBreak: 'break-word',
-                          '&:hover': { textDecoration: 'underline' },
-                        }}
-                      >
-                        {row.fullName || row.email}
-                      </Typography>
-                      <MetaLine
-                        items={[
-                          row.fullName ? row.email : null,
-                          `${statuses.length} rule${statuses.length === 1 ? '' : 's'} apply`,
-                        ]}
-                      />
-                    </Box>
+          {rows.length === 0 ? (
+            <EmptyState
+              art={ART.mascot.thinking}
+              title="No interns evaluated"
+              description="Either the batch has no interns, or no rule applies to them yet. Recompute to refresh."
+            />
+          ) : (
+            <Stack spacing={2}>
+              {rows.map((row) => {
+                const statuses = (row.statuses ?? []) as EvaluationRow[];
+                return (
+                  <Card key={row.internProfileId}>
+                    <Box sx={{ p: { xs: 2, sm: 2.5 } }}>
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography
+                          component={Link}
+                          href={`/admin/interns/${row.internProfileId}`}
+                          variant="subtitle2"
+                          sx={{
+                            fontWeight: 700,
+                            color: 'primary.main',
+                            textDecoration: 'none',
+                            wordBreak: 'break-word',
+                            '&:hover': { textDecoration: 'underline' },
+                          }}
+                        >
+                          {row.fullName || row.email}
+                        </Typography>
+                        <MetaLine
+                          parts={[
+                            row.fullName ? row.email : null,
+                            `${statuses.length} rule${statuses.length === 1 ? '' : 's'} apply`,
+                          ]}
+                        />
+                      </Box>
 
-                    {statuses.length ? (
-                      <Stack
-                        spacing={1.5}
-                        divider={<Divider flexItem />}
-                        sx={{ mt: 1.5 }}
-                      >
-                        {statuses.map((s, i) => (
-                          <EligibilityChecklist
-                            key={`${s.ruleId}-${i}`}
-                            bare
-                            status={s.status}
-                            progress={s.progress ?? []}
-                            reason={s.reason}
-                            rewardName={s.rewardName || 'Reward'}
-                            ruleName={s.ruleName}
-                            period={s.period ?? period}
-                            footer={
-                              s.statusId ? (
-                                <Stack
-                                  direction="row"
-                                  spacing={1}
-                                  alignItems="center"
-                                  sx={{ flexWrap: 'wrap', gap: 1 }}
-                                >
-                                  <Button
-                                    size="small"
-                                    startIcon={<GavelIcon />}
-                                    onClick={() =>
-                                      setOverride({
-                                        statusId: String(s.statusId),
-                                        label: `${row.email} — ${s.rewardName || s.ruleName || 'rule'}`,
-                                        status: s.status,
-                                      })
-                                    }
+                      {statuses.length ? (
+                        <Stack
+                          spacing={1.5}
+                          divider={<Divider flexItem />}
+                          sx={{ mt: 1.5 }}
+                        >
+                          {statuses.map((s, i) => (
+                            <EligibilityChecklist
+                              key={`${s.ruleId}-${i}`}
+                              bare
+                              status={s.status}
+                              progress={s.progress ?? []}
+                              reason={s.reason}
+                              rewardName={s.rewardName || 'Reward'}
+                              ruleName={s.ruleName}
+                              period={s.period ?? period}
+                              footer={
+                                s.statusId ? (
+                                  <Stack
+                                    direction="row"
+                                    spacing={1}
+                                    alignItems="center"
+                                    sx={{ flexWrap: 'wrap', gap: 1 }}
                                   >
-                                    Override
-                                  </Button>
-                                  {s.overridden && (
-                                    <Typography variant="caption" color="text.secondary">
-                                      Overridden by the team
-                                      {s.overrideNote ? `: ${s.overrideNote}` : ''}
-                                    </Typography>
-                                  )}
-                                </Stack>
-                              ) : undefined
-                            }
-                          />
-                        ))}
-                      </Stack>
-                    ) : (
-                      <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
-                        No rule applies to this intern — check the rule&apos;s track and program.
-                      </Typography>
-                    )}
-                  </Box>
-                </Card>
-              );
-            })}
-          </Stack>
+                                    <Button
+                                      size="small"
+                                      startIcon={<GavelIcon />}
+                                      onClick={() =>
+                                        setOverride({
+                                          statusId: String(s.statusId),
+                                          label: `${row.email} — ${s.rewardName || s.ruleName || 'rule'}`,
+                                          status: s.status,
+                                        })
+                                      }
+                                    >
+                                      Override
+                                    </Button>
+                                    {s.overridden && (
+                                      <Typography variant="caption" color="text.secondary">
+                                        Overridden by the team
+                                        {s.overrideNote ? `: ${s.overrideNote}` : ''}
+                                      </Typography>
+                                    )}
+                                  </Stack>
+                                ) : undefined
+                              }
+                            />
+                          ))}
+                        </Stack>
+                      ) : (
+                        <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
+                          No rule applies to this intern — check the rule&apos;s track and program.
+                        </Typography>
+                      )}
+                    </Box>
+                  </Card>
+                );
+              })}
+            </Stack>
+          )}
         </DataState>
       </Box>
 

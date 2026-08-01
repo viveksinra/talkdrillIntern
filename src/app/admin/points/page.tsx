@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Autocomplete from '@mui/material/Autocomplete';
 import Box from '@mui/material/Box';
@@ -15,10 +15,11 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import PersonSearchIcon from '@mui/icons-material/PersonSearch';
 import TuneIcon from '@mui/icons-material/Tune';
 import { DataState, errorMessage } from '@/components/DataStates';
 import EmptyState from '@/components/EmptyState';
+import SectionHead from '@/components/SectionHead';
+import { ART } from '@/lib/art';
 import { adjustPoints, getPointsLedger, listInterns } from '@/lib/api/adminInternship';
 import type { PointsSummary } from '@/lib/api/types';
 import AdminScreen, { ScrollArea, useSnack } from '../_shared/AdminScreen';
@@ -33,34 +34,6 @@ import { useAsync } from '../_shared/useAsync';
  * The ledger endpoint is per-intern (there is no global feed), so the picker
  * drives both the adjustment form and the feed.
  */
-
-/** Typographic section head — never a filled slab above the cards. */
-function SectionHead({
-  title,
-  caption,
-  action,
-}: {
-  title: string;
-  caption?: string;
-  action?: React.ReactNode;
-}) {
-  return (
-    <Box sx={{ mb: 1.25, px: 0.5 }}>
-      <Stack direction="row" alignItems="center" spacing={1}>
-        <Typography variant="overline" sx={{ color: 'primary.main' }}>
-          {title}
-        </Typography>
-        <Box sx={{ flexGrow: 1 }} />
-        {action}
-      </Stack>
-      {caption && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-          {caption}
-        </Typography>
-      )}
-    </Box>
-  );
-}
 
 /** One headline number in the ledger summary strip. */
 function Stat({ label, value }: { label: string; value: string }) {
@@ -78,15 +51,19 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 function LedgerFeed({ summary }: { summary: PointsSummary }) {
   const entries = summary.entries ?? [];
+  if (!entries.length) {
+    return (
+      <EmptyState
+        art={ART.empty.ledger}
+        title="No points movement yet"
+        description="Task approvals, adjustments and redemptions all land here."
+      />
+    );
+  }
   return (
-    <DataState
-      isEmpty={!entries.length}
-      emptyTitle="No points movement yet"
-      emptyDescription="Task approvals, adjustments and redemptions all land here."
-    >
-      <Card>
-        {/* Admin table — wrapped so the page body never scrolls sideways. */}
-        <ScrollArea>
+    <Card>
+      {/* Admin table — wrapped so the page body never scrolls sideways. */}
+      <ScrollArea>
           <Table size="small" sx={{ minWidth: 660 }}>
             <TableHead>
               <TableRow>
@@ -134,10 +111,9 @@ function LedgerFeed({ summary }: { summary: PointsSummary }) {
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
-        </ScrollArea>
-      </Card>
-    </DataState>
+        </Table>
+      </ScrollArea>
+    </Card>
   );
 }
 
@@ -208,7 +184,7 @@ function PointsBody() {
     <Stack spacing={3}>
       <Box>
         <SectionHead
-          title="Manual adjustment"
+          label="Manual adjustment"
           caption="Corrections only — task approvals and redemptions post themselves."
         />
         <Card sx={{ p: { xs: 2, sm: 2.5 } }}>
@@ -304,7 +280,8 @@ function PointsBody() {
       {selected ? (
         <Box>
           <SectionHead
-            title={`Ledger — ${internLabel(selected)}`}
+            label={`Ledger — ${internLabel(selected)}`}
+            count={summary?.total}
             caption="Newest first. Every row records the amount, the reason and who did it."
             action={
               <Button size="small" component={Link} href={`/admin/interns/${selected._id}`}>
@@ -327,17 +304,22 @@ function PointsBody() {
             loading={ledger.loading && !summary}
             error={ledger.error && !summary ? ledger.error : undefined}
             onRetry={ledger.reload}
-            isEmpty={!summary}
-            emptyTitle="No ledger loaded"
-            emptyDescription="Reload, or pick the intern again."
             skeletonRows={3}
           >
-            {summary ? <LedgerFeed summary={summary} /> : <span />}
+            {summary ? (
+              <LedgerFeed summary={summary} />
+            ) : (
+              <EmptyState
+                art={ART.empty.error}
+                title="No ledger loaded"
+                description="Reload, or pick the intern again."
+              />
+            )}
           </DataState>
         </Box>
       ) : (
         <EmptyState
-          icon={<PersonSearchIcon />}
+          art={ART.empty.search}
           title="Pick an intern to see their ledger"
           description="Search above by name or email. The feed shows every approval, adjustment and redemption behind their balance."
         />

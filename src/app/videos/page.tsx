@@ -1,39 +1,67 @@
 'use client';
 
 import Link from 'next/link';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
+import Dialog from '@mui/material/Dialog';
+import DialogActions from '@mui/material/DialogActions';
+import DialogContent from '@mui/material/DialogContent';
+import DialogTitle from '@mui/material/DialogTitle';
 import Grid from '@mui/material/Grid';
-import LinearProgress from '@mui/material/LinearProgress';
 import MenuItem from '@mui/material/MenuItem';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import MuiLink from '@mui/material/Link';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import { alpha, useTheme } from '@mui/material/styles';
+import AddRoundedIcon from '@mui/icons-material/AddRounded';
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
 import FavoriteIcon from '@mui/icons-material/Favorite';
 import MovieCreationIcon from '@mui/icons-material/MovieCreation';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import AppShell from '@/components/AppShell';
+import Art from '@/components/Art';
+import CountUp from '@/components/CountUp';
 import { ErrorState, Loading, errorMessage } from '@/components/DataStates';
 import EmptyState from '@/components/EmptyState';
+import Label from '@/components/Label';
+import MetaLine from '@/components/MetaLine';
 import PageHeader from '@/components/PageHeader';
-import StatusChip, { statusLabel } from '@/components/StatusChip';
+import ProgressRing from '@/components/ProgressRing';
+import Reveal from '@/components/Reveal';
+import SectionHead from '@/components/SectionHead';
+import StatCard from '@/components/StatCard';
+import { statusLabel } from '@/components/StatusChip';
 import { isValidUrl, normalizeUrl } from '@/components/ProofUploader';
 import { RequireAuth } from '@/lib/auth/guards';
+import { ART, videoPlaceholderArt, youtubeThumbnail } from '@/lib/art';
+import { celebrate, celebrateOnce } from '@/lib/juice';
+import { customShadows, FONT_DISPLAY, gradientTokens } from '@/theme';
 import { getMe, getMyVideos, submitVideo, type MeResponse } from '@/lib/api/internship';
-import type { VideoPlatform, VideoSubmission } from '@/lib/api/types';
+import {
+  isPopulated,
+  type InternProfile,
+  type Program,
+  type VideoPlatform,
+  type VideoSubmission,
+  type VideoTier,
+} from '@/lib/api/types';
 
-/** The list endpoint adds the countdown, the tier's label and the program name. */
+/**
+ * The list endpoint adds the countdown, the tier's label and the program name.
+ * `program` may also carry the batch's tier table when the backend populates it,
+ * so the ladder is read defensively from either shape.
+ */
 type MyVideo = VideoSubmission & {
   daysToEvaluation?: number | null;
   lockedTierLabel?: string | null;
-  program?: { _id: string; name: string } | null;
+  program?: ({ _id: string; name: string } & { videoTiers?: VideoTier[] }) | null;
 };
 
 const EVALUATION_WINDOW_DAYS = 30;
@@ -78,88 +106,409 @@ function shortUrl(raw: string): string {
   return raw.replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/$/, '');
 }
 
-/** A middot separator between two pieces of quiet metadata. */
-function Dot() {
-  return (
-    <Box component="span" sx={{ color: 'text.disabled' }}>
-      ·
-    </Box>
-  );
+function platformLabelOf(platform: string): string {
+  return PLATFORMS.find((p) => p.value === platform)?.label ?? platform;
 }
 
-function Stat({
-  icon,
-  value,
-  label,
-}: {
-  icon?: React.ReactNode;
-  value: string;
-  label: string;
-}) {
-  return (
-    <Box>
-      <Stack direction="row" spacing={0.75} alignItems="center">
-        {icon && (
-          <Box sx={{ color: 'text.disabled', display: 'flex', '& svg': { fontSize: 18 } }}>
-            {icon}
-          </Box>
-        )}
-        <Typography className="tnum" sx={{ fontSize: 20, fontWeight: 800, lineHeight: 1.2 }}>
-          {value}
-        </Typography>
-      </Stack>
-      <Typography variant="caption" color="text.secondary">
-        {label}
-      </Typography>
-    </Box>
-  );
+// ── tier ladder helpers ──────────────────────────────────────────────────
+
+/**
+ * Tiers live on the intern's programme. Depending on which endpoint populated
+ * it they can arrive on the profile's programIds, on the video's programId, or
+ * on the list endpoint's `program` decoration — so try all three and give up
+ * quietly (the whole block is skipped) when none of them carry a table.
+ */
+function collectTiers(profile: InternProfile | null, videos: MyVideo[]): VideoTier[] {
+  const found: VideoTier[] = [];
+
+  const take = (tiers: VideoTier[] | undefined | null) => {
+    if (found.length || !Array.isArray(tiers) || !tiers.length) return;
+    found.push(...tiers.filter((t) => t && Number.isFinite(Number(t.minViews))));
+  };
+
+  for (const ref of profile?.programIds ?? []) {
+    if (isPopulated<Program>(ref)) take(ref.videoTiers);
+  }
+  for (const video of videos) {
+    take(video.program?.videoTiers);
+    const ref = video.programId ?? null;
+    if (isPopulated<Program>(ref)) take(ref.videoTiers);
+  }
+
+  return found
+    .slice()
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.minViews ?? 0) - (b.minViews ?? 0));
+}
+
+/** Index of a locked tier key in the sorted ladder — drives the medallion art. */
+function tierIndexOf(tiers: VideoTier[], key: string | null | undefined): number {
+  if (!key) return -1;
+  return tiers.findIndex((t) => t.key === key);
+}
+
+function tierArtFor(index: number): string | null {
+  if (index < 0) return null;
+  return ART.tier[Math.min(index, ART.tier.length - 1)];
 }
 
 /**
- * The 30-day countdown is the whole emotional content of a pending video, so it
- * gets a figure rather than a sentence.
+ * Where the intern's best video sits on the rail, as a percentage. Nodes are
+ * laid out in equal columns, so tier `i` is centred at (i + 0.5)/n and the
+ * marker interpolates linearly between the two tiers it falls between.
  */
+function railPercent(views: number, tiers: VideoTier[]): number {
+  const n = tiers.length;
+  if (!n || views <= 0) return 0;
+  const center = (i: number) => ((i + 0.5) / n) * 100;
+
+  const first = tiers[0].minViews || 0;
+  if (views < first) return first > 0 ? center(0) * (views / first) : 0;
+
+  for (let i = n - 1; i >= 0; i -= 1) {
+    if (views >= (tiers[i].minViews || 0)) {
+      if (i === n - 1) return 100;
+      const span = (tiers[i + 1].minViews || 0) - (tiers[i].minViews || 0);
+      const t = span > 0 ? (views - (tiers[i].minViews || 0)) / span : 0;
+      return center(i) + (center(i + 1) - center(i)) * Math.min(1, Math.max(0, t));
+    }
+  }
+  return 0;
+}
+
+const NODE_MIN_WIDTH = 92;
+
+/**
+ * The headline visualisation: one milestone track for the whole programme, with
+ * the intern's best 30-day video plotted on it. Tiers do not stack, so the only
+ * number that matters is the gap to the next unreached rung — that is the one
+ * display-face moment on the screen.
+ */
+function TierTrack({
+  tiers,
+  bestViews,
+  unlockedCash,
+}: {
+  tiers: VideoTier[];
+  bestViews: number;
+  unlockedCash: number;
+}) {
+  const theme = useTheme();
+  const next = tiers.find((t) => (t.minViews || 0) > bestViews) ?? null;
+  const top = tiers[tiers.length - 1];
+  const fill = railPercent(bestViews, tiers);
+  const railTop = 22; // vertical centre of the 44px node badge
+
+  return (
+    <Card sx={{ overflow: 'hidden' }}>
+      <Box sx={{ p: { xs: 2, sm: 2.5 } }}>
+        <Typography variant="overline" sx={{ color: 'primary.main', display: 'block' }}>
+          {next ? 'Next views tier' : 'Top tier reached'}
+        </Typography>
+
+        <Typography
+          sx={{
+            fontFamily: FONT_DISPLAY,
+            fontWeight: 700,
+            fontSize: { xs: 28, sm: 36 },
+            lineHeight: 1.15,
+            letterSpacing: '-0.02em',
+            mt: 0.25,
+          }}
+        >
+          {next ? (
+            <>
+              <Box component="span" className="tnum">
+                <CountUp value={Math.max(0, (next.minViews || 0) - bestViews)} />
+              </Box>{' '}
+              views to{' '}
+              <Box component="span" className="tnum" sx={{ color: 'primary.main' }}>
+                {INR.format(next.cashAmount || 0)}
+              </Box>
+            </>
+          ) : (
+            <>
+              You are at{' '}
+              <Box component="span" sx={{ color: 'primary.main' }}>
+                {top?.label || top?.key || 'the top tier'}
+              </Box>
+            </>
+          )}
+        </Typography>
+
+        <MetaLine
+          sx={{ mt: 0.75 }}
+          parts={[
+            bestViews > 0 ? (
+              <Box component="span" className="tnum">
+                Best video · {NUM.format(bestViews)} views
+              </Box>
+            ) : (
+              'No 30-day numbers recorded yet'
+            ),
+            unlockedCash > 0 && (
+              <Box component="span" className="tnum" sx={{ color: 'success.dark', fontWeight: 700 }}>
+                {INR.format(unlockedCash)} unlocked
+              </Box>
+            ),
+            'Tiers do not stack',
+          ]}
+        />
+      </Box>
+
+      {/* xs cannot fit five rungs — the track scrolls rather than squashing. */}
+      <Box
+        sx={{
+          overflowX: 'auto',
+          overflowY: 'hidden',
+          px: { xs: 2, sm: 2.5 },
+          pb: 2.5,
+          WebkitOverflowScrolling: 'touch',
+          '&::-webkit-scrollbar': { height: 6 },
+          '&::-webkit-scrollbar-thumb': {
+            borderRadius: 99,
+            backgroundColor: alpha(theme.palette.text.disabled, 0.35),
+          },
+        }}
+      >
+        <Box sx={{ position: 'relative', minWidth: tiers.length * NODE_MIN_WIDTH, pt: 0.5 }}>
+          {/* rail */}
+          <Box
+            aria-hidden
+            sx={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: railTop,
+              height: 4,
+              borderRadius: 99,
+              bgcolor: alpha(theme.palette.text.disabled, 0.24),
+            }}
+          />
+          <Box
+            aria-hidden
+            sx={{
+              position: 'absolute',
+              left: 0,
+              top: railTop,
+              width: `${fill}%`,
+              height: 4,
+              borderRadius: 99,
+              background: gradientTokens.violet,
+              transition: 'width .8s cubic-bezier(0.22, 1, 0.36, 1)',
+            }}
+          />
+          {bestViews > 0 && (
+            <Box
+              aria-hidden
+              sx={{
+                position: 'absolute',
+                left: `${fill}%`,
+                top: railTop - 4,
+                width: 12,
+                height: 12,
+                ml: '-6px',
+                borderRadius: '50%',
+                bgcolor: 'primary.main',
+                border: '2px solid',
+                borderColor: 'background.paper',
+                boxShadow: (t) => t.customShadows.primary,
+                zIndex: 2,
+                transition: 'left .8s cubic-bezier(0.22, 1, 0.36, 1)',
+              }}
+            />
+          )}
+
+          <Stack direction="row" sx={{ position: 'relative' }}>
+            {tiers.map((tier, i) => {
+              const reached = bestViews >= (tier.minViews || 0);
+              const art = tierArtFor(i);
+              return (
+                <Stack
+                  key={tier.key || i}
+                  alignItems="center"
+                  spacing={0.5}
+                  sx={{
+                    flex: '1 0 0',
+                    minWidth: NODE_MIN_WIDTH,
+                    px: 0.5,
+                    textAlign: 'center',
+                  }}
+                >
+                  <Box
+                    sx={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: '50%',
+                      display: 'grid',
+                      placeItems: 'center',
+                      bgcolor: 'background.paper',
+                      border: '2px solid',
+                      borderColor: reached ? 'primary.main' : 'divider',
+                      zIndex: 1,
+                    }}
+                  >
+                    {art ? (
+                      <Art
+                        src={art}
+                        size={32}
+                        sx={{
+                          filter: reached ? 'none' : 'grayscale(1)',
+                          opacity: reached ? 1 : 0.45,
+                          transition: 'filter .4s ease, opacity .4s ease',
+                        }}
+                      />
+                    ) : (
+                      <Typography className="tnum" variant="caption" sx={{ fontWeight: 800 }}>
+                        {i + 1}
+                      </Typography>
+                    )}
+                  </Box>
+                  <Typography
+                    className="tnum"
+                    variant="caption"
+                    sx={{
+                      fontWeight: 700,
+                      lineHeight: 1.3,
+                      color: reached ? 'text.primary' : 'text.disabled',
+                    }}
+                  >
+                    {NUM.format(tier.minViews || 0)}
+                  </Typography>
+                  <Typography
+                    className="tnum"
+                    variant="caption"
+                    sx={{
+                      fontWeight: 800,
+                      lineHeight: 1.2,
+                      color: reached ? 'primary.main' : 'text.disabled',
+                    }}
+                  >
+                    {INR.format(tier.cashAmount || 0)}
+                  </Typography>
+                  {(tier.label || tier.key) && (
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        fontSize: 11,
+                        lineHeight: 1.2,
+                        color: 'text.secondary',
+                        opacity: reached ? 1 : 0.7,
+                      }}
+                    >
+                      {tier.label || tier.key}
+                    </Typography>
+                  )}
+                </Stack>
+              );
+            })}
+          </Stack>
+        </Box>
+      </Box>
+    </Card>
+  );
+}
+
+// ── video card ───────────────────────────────────────────────────────────
+
+const STATUS_LABEL: Record<
+  string,
+  { text: string; color: 'warning' | 'info' | 'error' | 'success' }
+> = {
+  pending_evaluation: { text: 'Window open', color: 'warning' },
+  due_for_evaluation: { text: 'Being counted', color: 'info' },
+  rejected: { text: 'Not counted', color: 'error' },
+  evaluated: { text: 'Evaluated', color: 'success' },
+};
+
+/** 16:9 media band — the real YouTube frame when we can derive one, clay art otherwise. */
+function VideoThumb({ video }: { video: MyVideo }) {
+  const thumb = youtubeThumbnail(video.videoUrl);
+  const meta = STATUS_LABEL[video.status];
+
+  return (
+    <Box
+      sx={{
+        position: 'relative',
+        width: '100%',
+        aspectRatio: '16 / 9',
+        flexShrink: 0,
+        bgcolor: (t) => alpha(t.palette.primary.main, 0.08),
+        display: 'grid',
+        placeItems: 'center',
+        overflow: 'hidden',
+      }}
+    >
+      {thumb ? (
+        <Box
+          component="img"
+          src={thumb}
+          alt=""
+          aria-hidden
+          loading="lazy"
+          sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+        />
+      ) : (
+        <Art src={videoPlaceholderArt(video.platform)} size={72} />
+      )}
+      {meta && (
+        <Label
+          color={meta.color}
+          variant="filled"
+          sx={{ position: 'absolute', top: 8, right: 8, boxShadow: customShadows.z1 }}
+        >
+          {meta.text}
+        </Label>
+      )}
+    </Box>
+  );
+}
+
+/** The 30-day clock as a ring: the day number stays, the sentence gets quieter. */
 function Countdown({ days, dueAt }: { days: number | null; dueAt?: string }) {
   const elapsedPct =
     days === null
       ? 0
       : Math.max(0, Math.min(100, ((EVALUATION_WINDOW_DAYS - days) / EVALUATION_WINDOW_DAYS) * 100));
 
+  const caption =
+    days === null
+      ? 'Counting down to the 30-day check.'
+      : days === 0
+        ? 'The window closes today — the team records your numbers next.'
+        : `Views and likes are read${dueAt ? ` on ${formatDate(dueAt)}` : ' 30 days after you posted'}.`;
+
   return (
-    <Box sx={{ p: 1.5, borderRadius: 2.5, bgcolor: 'primary.lighter', color: 'primary.darker' }}>
-      <Stack direction="row" alignItems="baseline" spacing={0.75}>
+    <Stack direction="row" spacing={1.5} alignItems="center">
+      <ProgressRing
+        value={elapsedPct}
+        size={56}
+        thickness={5}
+        ariaLabel={days === null ? 'Evaluation pending' : `${days} days to evaluation`}
+      >
         {days === null ? (
-          <Typography sx={{ fontSize: 18, fontWeight: 800, lineHeight: 1 }}>Counting</Typography>
-        ) : days === 0 ? (
-          <Typography sx={{ fontSize: 18, fontWeight: 800, lineHeight: 1 }}>Today</Typography>
+          <Typography variant="caption" sx={{ fontWeight: 800 }}>
+            —
+          </Typography>
         ) : (
-          <>
-            <Typography className="tnum" sx={{ fontSize: 26, fontWeight: 800, lineHeight: 1 }}>
+          <Box>
+            <Typography className="tnum" sx={{ fontSize: 17, fontWeight: 800, lineHeight: 1 }}>
               {days}
             </Typography>
-            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-              {days === 1 ? 'day to go' : 'days to go'}
+            <Typography sx={{ fontSize: 9, lineHeight: 1.2, color: 'text.secondary' }}>
+              {days === 1 ? 'day' : 'days'}
             </Typography>
-          </>
+          </Box>
         )}
-      </Stack>
-      <LinearProgress
-        variant="determinate"
-        value={elapsedPct}
-        sx={{ height: 6, my: 1, bgcolor: (t) => t.palette.common.white }}
-      />
-      <Typography variant="caption" sx={{ opacity: 0.85 }}>
-        {days === 0
-          ? 'The window closes today — the team records your numbers next.'
-          : `Views and likes are read${dueAt ? ` on ${formatDate(dueAt)}` : ' 30 days after you posted'}.`}
+      </ProgressRing>
+      <Typography variant="caption" color="text.secondary">
+        {caption}
       </Typography>
-    </Box>
+    </Stack>
   );
 }
 
-function VideoCard({ video }: { video: MyVideo }) {
-  const platformLabel =
-    PLATFORMS.find((p) => p.value === video.platform)?.label ?? video.platform;
+function VideoCard({ video, tiers }: { video: MyVideo; tiers: VideoTier[] }) {
+  const tierArt = tierArtFor(tierIndexOf(tiers, video.lockedTierKey));
 
   return (
     <Card
@@ -167,6 +516,7 @@ function VideoCard({ video }: { video: MyVideo }) {
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
+        overflow: 'hidden',
         transition: (t) =>
           t.transitions.create(['box-shadow', 'transform', 'border-color'], { duration: 200 }),
         '&:hover': {
@@ -177,136 +527,123 @@ function VideoCard({ video }: { video: MyVideo }) {
         ...(video.status === 'rejected' && { borderColor: 'error.light' }),
       }}
     >
-      <CardContent sx={{ flexGrow: 1 }}>
-        <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ mb: 1.25 }}>
-          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-            <MuiLink
-              href={video.videoUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={video.videoUrl}
-              variant="body2"
-              noWrap
-              sx={{ fontWeight: 700, display: 'block' }}
-            >
-              {shortUrl(video.videoUrl)}
-              <OpenInNewIcon sx={{ fontSize: 13, ml: 0.5, verticalAlign: 'baseline' }} />
-            </MuiLink>
-            <Stack
-              direction="row"
-              alignItems="center"
-              sx={{ mt: 0.25, gap: 0.75, flexWrap: 'wrap', typography: 'caption' }}
-            >
-              <Box component="span" sx={{ color: 'text.secondary' }}>
-                {platformLabel}
-              </Box>
-              {video.postedAt && (
-                <>
-                  <Dot />
-                  <Box component="span" sx={{ color: 'text.secondary' }}>
-                    posted {formatDate(video.postedAt)}
-                  </Box>
-                </>
-              )}
-              {video.program?.name && (
-                <>
-                  <Dot />
-                  <Box component="span" sx={{ color: 'text.secondary' }}>
-                    {video.program.name}
-                  </Box>
-                </>
-              )}
-            </Stack>
-          </Box>
-          <StatusChip status={video.status} />
-        </Stack>
+      <VideoThumb video={video} />
+
+      <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+        <Box sx={{ minWidth: 0 }}>
+          <MuiLink
+            href={video.videoUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={video.videoUrl}
+            variant="body2"
+            noWrap
+            sx={{ fontWeight: 700, display: 'block' }}
+          >
+            {shortUrl(video.videoUrl)}
+            <OpenInNewIcon sx={{ fontSize: 13, ml: 0.5, verticalAlign: 'baseline' }} />
+          </MuiLink>
+          <MetaLine
+            sx={{ mt: 0.25 }}
+            parts={[
+              platformLabelOf(video.platform),
+              video.postedAt && `posted ${formatDate(video.postedAt)}`,
+              video.program?.name,
+            ]}
+          />
+        </Box>
 
         {video.status === 'pending_evaluation' && (
           <Countdown days={video.daysToEvaluation ?? null} dueAt={video.evaluationDueAt} />
         )}
 
         {video.status === 'due_for_evaluation' && (
-          <Box
-            sx={{ p: 1.5, borderRadius: 2.5, bgcolor: 'warning.lighter', color: 'warning.darker' }}
-          >
-            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-              30 days are up
-            </Typography>
-            <Typography variant="caption">
-              The team is recording your numbers — nothing needed from you.
-            </Typography>
-          </Box>
+          <Typography variant="caption" color="text.secondary">
+            30 days are up — the team is recording your numbers. Nothing needed from you.
+          </Typography>
         )}
 
-        {video.status === 'rejected' && video.rejectionReason && (
-          <Box sx={{ p: 1.5, borderRadius: 2.5, bgcolor: 'error.lighter', color: 'error.darker' }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-              Not counted
-            </Typography>
-            <Typography variant="caption">{video.rejectionReason}</Typography>
-          </Box>
+        {video.status === 'rejected' && (
+          <Typography variant="caption" sx={{ color: 'error.dark' }}>
+            {video.rejectionReason || 'This one was not counted towards rewards.'}
+          </Typography>
         )}
 
         {video.status === 'evaluated' && (
-          <Stack spacing={1.5}>
-            {/* The tier is the outcome, so it is the headline; the raw numbers explain it. */}
+          <>
             {video.lockedTierKey ? (
-              <Box
-                sx={{
-                  p: 1.5,
-                  borderRadius: 2.5,
-                  bgcolor: 'success.lighter',
-                  color: 'success.darker',
-                }}
+              <Stack
+                direction="row"
+                spacing={1.25}
+                alignItems="center"
+                sx={{ p: 1.25, borderRadius: 2.5, bgcolor: 'success.lighter' }}
               >
-                <Typography variant="overline" sx={{ display: 'block', opacity: 0.8 }}>
-                  Tier unlocked
-                </Typography>
-                <Typography variant="h6" sx={{ color: 'inherit' }}>
-                  {video.lockedTierLabel ?? video.lockedTierKey}
-                </Typography>
-                <Typography className="tnum" variant="caption">
-                  {video.lockedCashAmount > 0
-                    ? `${INR.format(video.lockedCashAmount)} queued for payout by the team.`
-                    : 'Your reward for this tier is queued with the team.'}
-                </Typography>
-              </Box>
+                {tierArt && <Art src={tierArt} size={32} />}
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography
+                    variant="subtitle2"
+                    sx={{ fontWeight: 800, color: 'success.darker' }}
+                    noWrap
+                  >
+                    {video.lockedTierLabel ?? video.lockedTierKey}
+                  </Typography>
+                  <Typography className="tnum" variant="caption" sx={{ color: 'success.dark' }}>
+                    {video.lockedCashAmount > 0
+                      ? `${INR.format(video.lockedCashAmount)} queued for payout by the team.`
+                      : 'Your reward for this tier is queued with the team.'}
+                  </Typography>
+                </Box>
+              </Stack>
             ) : (
-              <Typography variant="body2" color="text.secondary">
-                This one did not reach the first views tier — it still counts towards your monthly
-                video target.
+              <Typography variant="caption" color="text.secondary">
+                Did not reach the first views tier — it still counts towards your monthly video
+                target.
               </Typography>
             )}
 
-            <Stack direction="row" spacing={3}>
-              <Stat
-                icon={<VisibilityIcon />}
-                value={NUM.format(video.views30d ?? 0)}
-                label="views at 30 days"
-              />
-              <Stat
-                icon={<FavoriteIcon />}
-                value={NUM.format(video.likes30d ?? 0)}
-                label="likes at 30 days"
-              />
-            </Stack>
-
-            {video.countsForBaseline && (
-              <Stack direction="row" spacing={0.5} alignItems="center">
-                <CheckCircleRoundedIcon sx={{ fontSize: 15, color: 'success.main' }} />
-                <Typography variant="caption" sx={{ color: 'success.dark', fontWeight: 600 }}>
-                  Counts towards your monthly target
-                </Typography>
-              </Stack>
-            )}
-          </Stack>
+            <MetaLine
+              sx={{ mt: 'auto', pt: 0.25 }}
+              parts={[
+                <Box key="v" component="span" className="tnum">
+                  <VisibilityIcon sx={{ fontSize: 15, mr: 0.5, color: 'text.disabled' }} />
+                  {NUM.format(video.views30d ?? 0)} views
+                </Box>,
+                <Box key="l" component="span" className="tnum">
+                  <FavoriteIcon sx={{ fontSize: 15, mr: 0.5, color: 'text.disabled' }} />
+                  {NUM.format(video.likes30d ?? 0)} likes
+                </Box>,
+                video.countsForBaseline && (
+                  <Box key="b" component="span" sx={{ color: 'success.dark', fontWeight: 600 }}>
+                    <CheckCircleRoundedIcon
+                      sx={{ fontSize: 14, mr: 0.5, color: 'success.main', verticalAlign: '-2px' }}
+                    />
+                    Counts to target
+                  </Box>
+                ),
+              ]}
+            />
+          </>
         )}
       </CardContent>
     </Card>
   );
 }
 
-function SubmitVideoForm({ disabled, onSubmitted }: { disabled: boolean; onSubmitted: () => void }) {
+// ── submit dialog ────────────────────────────────────────────────────────
+
+function SubmitVideoDialog({
+  open,
+  disabled,
+  onClose,
+  onSubmitted,
+}: {
+  open: boolean;
+  disabled: boolean;
+  onClose: () => void;
+  onSubmitted: (message: string) => void;
+}) {
+  const theme = useTheme();
+  const fullScreen = useMediaQuery(theme.breakpoints.down('sm'));
   const today = useMemo(todayInputValue, []);
   const [videoUrl, setVideoUrl] = useState('');
   const [platform, setPlatform] = useState<VideoPlatform>('instagram');
@@ -314,7 +651,6 @@ function SubmitVideoForm({ disabled, onSubmitted }: { disabled: boolean; onSubmi
   const [dashboardProofUrl, setDashboardProofUrl] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
 
   const urlOk = isValidUrl(videoUrl);
   const proofOk = !dashboardProofUrl.trim() || isValidUrl(dashboardProofUrl);
@@ -323,7 +659,6 @@ function SubmitVideoForm({ disabled, onSubmitted }: { disabled: boolean; onSubmi
   const submit = async () => {
     setSaving(true);
     setError(null);
-    setSuccess(null);
     try {
       const created = await submitVideo({
         videoUrl: normalizeUrl(videoUrl),
@@ -335,12 +670,13 @@ function SubmitVideoForm({ disabled, onSubmitted }: { disabled: boolean; onSubmi
       setVideoUrl('');
       setDashboardProofUrl('');
       setPostedAt(today);
-      setSuccess(
+      celebrate();
+      onSubmitted(
         created.evaluationDueAt
           ? `Logged. We check the numbers on ${formatDate(created.evaluationDueAt)}.`
           : 'Logged. We check the numbers 30 days after you posted.'
       );
-      onSubmitted();
+      onClose();
     } catch (e) {
       setError(errorMessage(e, 'Could not log this video.'));
     } finally {
@@ -349,17 +685,23 @@ function SubmitVideoForm({ disabled, onSubmitted }: { disabled: boolean; onSubmi
   };
 
   return (
-    <Card>
-      <CardContent>
-        <Typography variant="overline" sx={{ color: 'primary.main', display: 'block' }}>
-          Log a video
-        </Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+    <Dialog
+      open={open}
+      onClose={saving ? undefined : onClose}
+      fullWidth
+      maxWidth="sm"
+      fullScreen={fullScreen}
+    >
+      <DialogTitle sx={{ pb: 0.5 }}>
+        Log a video
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
           Log it the day you post. Views and likes are read 30 days later, and the highest views
           tier you reached is what pays — tiers do not stack.
         </Typography>
+      </DialogTitle>
 
-        <Stack spacing={2}>
+      <DialogContent>
+        <Stack spacing={2} sx={{ pt: 1 }}>
           <TextField
             label="Video link"
             placeholder="https://instagram.com/reel/…"
@@ -425,40 +767,60 @@ function SubmitVideoForm({ disabled, onSubmitted }: { disabled: boolean; onSubmi
           />
 
           {error && <Alert severity="error">{error}</Alert>}
-          {success && (
-            <Alert severity="success" onClose={() => setSuccess(null)}>
-              {success}
-            </Alert>
-          )}
-
-          {/* The form's single primary action — the one place a full-width button belongs. */}
-          <Button variant="contained" size="large" disabled={!canSubmit} onClick={submit}>
-            {saving ? 'Logging…' : 'Log this video'}
-          </Button>
         </Stack>
-      </CardContent>
-    </Card>
+      </DialogContent>
+
+      <DialogActions sx={{ px: 3, pb: 3, pt: 1 }}>
+        <Button color="inherit" onClick={onClose} disabled={saving}>
+          Cancel
+        </Button>
+        <Button variant="contained" disabled={!canSubmit} onClick={submit}>
+          {saving ? 'Logging…' : 'Log this video'}
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }
 
+// ── screen ───────────────────────────────────────────────────────────────
+
 function VideoTotals({ videos }: { videos: MyVideo[] }) {
-  const evaluated = videos.filter((v) => v.status === 'evaluated');
-  const totalCash = evaluated.reduce((sum, v) => sum + (v.lockedCashAmount || 0), 0);
+  const views = videos.reduce((sum, v) => sum + (v.views30d ?? 0), 0);
+  const likes = videos.reduce((sum, v) => sum + (v.likes30d ?? 0), 0);
   const waiting = videos.filter(
     (v) => v.status === 'pending_evaluation' || v.status === 'due_for_evaluation'
   ).length;
 
   return (
-    <Card>
-      <Stack
-        direction="row"
-        sx={{ p: { xs: 2, sm: 2.5 }, gap: { xs: 2.5, sm: 5 }, flexWrap: 'wrap' }}
-      >
-        <Stat value={NUM.format(videos.length)} label="videos logged" />
-        <Stat value={NUM.format(waiting)} label="waiting on the clock" />
-        <Stat value={INR.format(totalCash)} label="unlocked so far" />
-      </Stack>
-    </Card>
+    <Grid container spacing={2}>
+      <Grid size={{ xs: 12, sm: 4 }}>
+        <StatCard
+          title="Views counted"
+          value={views}
+          hint="At the 30-day read"
+          icon={<VisibilityIcon />}
+          tone="primary"
+        />
+      </Grid>
+      <Grid size={{ xs: 6, sm: 4 }}>
+        <StatCard
+          title="Likes counted"
+          value={likes}
+          hint="At the 30-day read"
+          icon={<FavoriteIcon />}
+          tone="error"
+        />
+      </Grid>
+      <Grid size={{ xs: 6, sm: 4 }}>
+        <StatCard
+          title="Videos logged"
+          value={videos.length}
+          hint={waiting ? `${waiting} on the clock` : 'All evaluated'}
+          icon={<MovieCreationIcon />}
+          tone="info"
+        />
+      </Grid>
+    </Grid>
   );
 }
 
@@ -467,6 +829,9 @@ function VideosScreen() {
   const [videos, setVideos] = useState<MyVideo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const celebrated = useRef(false);
 
   const load = useCallback((initial = false) => {
     if (initial) setLoading(true);
@@ -487,91 +852,162 @@ function VideosScreen() {
     load(true);
   }, [load]);
 
-  if (loading) return <Loading label="Loading your videos…" />;
-  if (error) return <ErrorState error={error} onRetry={() => load(true)} />;
-
   const profile = me?.internProfile ?? null;
+  const tiers = useMemo(() => collectTiers(profile, videos), [profile, videos]);
+  const bestViews = videos.reduce((max, v) => Math.max(max, v.views30d ?? 0), 0);
+  const unlockedCash = videos
+    .filter((v) => v.status === 'evaluated')
+    .reduce((sum, v) => sum + (v.lockedCashAmount || 0), 0);
 
-  if (!profile) {
-    return (
-      <Alert severity="info">
-        Video submissions are for enrolled content-track interns. Sign in with the email you gave
-        the TalkDrill team if this looks wrong.
-      </Alert>
-    );
-  }
+  // A tier unlocked while the intern was away is a win they discover passively.
+  useEffect(() => {
+    if (celebrated.current) return;
+    const won = videos.find((v) => v.status === 'evaluated' && v.lockedTierKey);
+    if (!won) return;
+    celebrated.current = true;
+    celebrateOnce(`video-tier-${won._id}`);
+  }, [videos]);
 
-  // The backend rejects video posts from other tracks, so say so instead of showing a dead form.
-  if (profile.track !== 'content') {
-    return (
-      <EmptyState
-        icon={<MovieCreationIcon />}
-        title="Videos are not part of your track"
-        description="This page is for Content Creator interns, who earn per-video rewards based on 30-day views. Your tasks and rewards work the same way without it."
-        action={
-          <Button component={Link} href="/tasks" variant="contained">
-            Go to my tasks
+  const canLog = !!profile && profile.track === 'content' && profile.status === 'active';
+
+  const header = (
+    <PageHeader
+      title="My videos"
+      subtitle="Log what you post — rewards are decided on the 30-day numbers."
+      action={
+        canLog ? (
+          <Button
+            variant="contained"
+            startIcon={<AddRoundedIcon />}
+            onClick={() => setFormOpen(true)}
+          >
+            Add video
           </Button>
-        }
-      />
+        ) : undefined
+      }
+    />
+  );
+
+  const body = () => {
+    if (loading) return <Loading label="Loading your videos…" />;
+    if (error) return <ErrorState error={error} onRetry={() => load(true)} />;
+
+    if (!profile) {
+      return (
+        <Alert severity="info">
+          Video submissions are for enrolled content-track interns. Sign in with the email you gave
+          the TalkDrill team if this looks wrong.
+        </Alert>
+      );
+    }
+
+    // The backend rejects video posts from other tracks, so say so instead of showing a dead form.
+    if (profile.track !== 'content') {
+      return (
+        <EmptyState
+          art={ART.track.content}
+          title="Videos are not part of your track"
+          description="This page is for Content Creator interns, who earn per-video rewards based on 30-day views. Your tasks and rewards work the same way without it."
+          action={
+            <Button component={Link} href="/tasks" variant="contained">
+              Go to my tasks
+            </Button>
+          }
+        />
+      );
+    }
+
+    return (
+      <Stack spacing={3}>
+        {tiers.length > 0 && (
+          <TierTrack tiers={tiers} bestViews={bestViews} unlockedCash={unlockedCash} />
+        )}
+
+        {videos.length > 0 && <VideoTotals videos={videos} />}
+
+        {profile.status !== 'active' && (
+          <Stack
+            direction="row"
+            spacing={1.25}
+            alignItems="center"
+            sx={{
+              px: 1.75,
+              py: 1.25,
+              borderRadius: 2.5,
+              bgcolor: 'warning.lighter',
+              flexWrap: 'wrap',
+              rowGap: 0.5,
+            }}
+          >
+            <Label color="warning" variant="filled">
+              {statusLabel(profile.status)}
+            </Label>
+            <Typography variant="caption" sx={{ color: 'warning.darker' }}>
+              New videos cannot be logged right now. Everything already submitted still gets
+              evaluated.
+            </Typography>
+          </Stack>
+        )}
+
+        {notice && (
+          <Alert severity="success" onClose={() => setNotice(null)}>
+            {notice}
+          </Alert>
+        )}
+
+        <Box>
+          <SectionHead
+            label="My videos"
+            count={videos.length || undefined}
+            caption="Each one is evaluated 30 days after you posted it."
+          />
+
+          {!videos.length ? (
+            <EmptyState
+              art={ART.empty.videos}
+              title="No videos logged yet"
+              description="Post your first video, then log it here so the 30-day clock starts."
+              action={
+                <Button
+                  variant="contained"
+                  startIcon={<AddRoundedIcon />}
+                  disabled={!canLog}
+                  onClick={() => setFormOpen(true)}
+                >
+                  Add video
+                </Button>
+              }
+            />
+          ) : (
+            <Grid container spacing={2}>
+              {videos.map((video, i) => (
+                <Grid key={video._id} size={{ xs: 12, sm: 6 }}>
+                  <Reveal index={i} sx={{ height: '100%' }}>
+                    <VideoCard video={video} tiers={tiers} />
+                  </Reveal>
+                </Grid>
+              ))}
+            </Grid>
+          )}
+        </Box>
+      </Stack>
     );
-  }
+  };
 
   return (
-    <Stack spacing={3}>
-      {videos.length > 0 && <VideoTotals videos={videos} />}
-
-      {profile.status !== 'active' && (
-        <Alert severity="warning">
-          Your internship is {statusLabel(profile.status).toLowerCase()}, so new videos cannot be
-          logged right now. Everything
-          already submitted still gets evaluated.
-        </Alert>
-      )}
-
-      <SubmitVideoForm disabled={profile.status !== 'active'} onSubmitted={() => load()} />
-
-      <Box>
-        <Stack direction="row" alignItems="baseline" spacing={1} sx={{ mb: 0.5, px: 0.5 }}>
-          <Typography variant="overline" sx={{ color: 'text.secondary' }}>
-            My videos
-          </Typography>
-          {videos.length > 0 && (
-            <Typography
-              className="tnum"
-              variant="caption"
-              sx={{ color: 'text.disabled', fontWeight: 600 }}
-            >
-              {videos.length}
-            </Typography>
-          )}
-        </Stack>
-        <Typography
-          variant="caption"
-          color="text.secondary"
-          sx={{ display: 'block', mb: 1.5, px: 0.5 }}
-        >
-          Each one is evaluated 30 days after you posted it.
-        </Typography>
-
-        {!videos.length ? (
-          <EmptyState
-            dense
-            icon={<MovieCreationIcon />}
-            title="No videos logged yet"
-            description="Post your first video, then log it here so the 30-day clock starts."
-          />
-        ) : (
-          <Grid container spacing={2}>
-            {videos.map((video) => (
-              <Grid key={video._id} size={{ xs: 12, sm: 6 }}>
-                <VideoCard video={video} />
-              </Grid>
-            ))}
-          </Grid>
-        )}
-      </Box>
-    </Stack>
+    <>
+      {header}
+      {body()}
+      <SubmitVideoDialog
+        open={formOpen}
+        disabled={!canLog}
+        onClose={() => setFormOpen(false)}
+        onSubmitted={(message) => {
+          setNotice(message);
+          load();
+        }}
+      />
+    </>
   );
 }
 
@@ -579,10 +1015,6 @@ export default function VideosPage() {
   return (
     <RequireAuth>
       <AppShell>
-        <PageHeader
-          title="My videos"
-          subtitle="Log what you post — rewards are decided on the 30-day numbers."
-        />
         <VideosScreen />
       </AppShell>
     </RequireAuth>

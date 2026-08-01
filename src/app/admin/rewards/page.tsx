@@ -7,7 +7,6 @@ import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Checkbox from '@mui/material/Checkbox';
-import Chip from '@mui/material/Chip';
 import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
@@ -28,9 +27,15 @@ import EditIcon from '@mui/icons-material/Edit';
 import RedeemIcon from '@mui/icons-material/Redeem';
 import RuleIcon from '@mui/icons-material/Rule';
 import VolunteerActivismIcon from '@mui/icons-material/VolunteerActivism';
+import Art from '@/components/Art';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { DataState, errorMessage } from '@/components/DataStates';
+import EmptyState from '@/components/EmptyState';
+import Label from '@/components/Label';
+import MetaLine from '@/components/MetaLine';
 import PointsBadge from '@/components/PointsBadge';
+import SectionHead from '@/components/SectionHead';
+import { ART, rewardFallbackArt } from '@/lib/art';
 import {
   createReward,
   deleteReward,
@@ -109,47 +114,6 @@ const trackLabel = (track: Track | null | undefined) =>
   track ? TRACK_LABELS[track] : 'Any track';
 
 // ── small layout atoms ───────────────────────────────────────────────────
-
-function Dot() {
-  return (
-    <Box component="span" sx={{ color: 'text.disabled' }}>
-      ·
-    </Box>
-  );
-}
-
-/** Typographic section head — never a filled slab competing with the cards under it. */
-function SectionHead({
-  title,
-  count,
-  description,
-}: {
-  title: string;
-  count?: string;
-  description: string;
-}) {
-  return (
-    <Box sx={{ px: 0.5, mb: 1.5 }}>
-      <Stack direction="row" alignItems="baseline" spacing={1}>
-        <Typography variant="overline" sx={{ color: 'primary.main' }}>
-          {title}
-        </Typography>
-        {count && (
-          <Typography
-            className="tnum"
-            variant="caption"
-            sx={{ color: 'text.disabled', fontWeight: 600 }}
-          >
-            {count}
-          </Typography>
-        )}
-      </Stack>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-        {description}
-      </Typography>
-    </Box>
-  );
-}
 
 /** Field group inside a dialog: an overline label, one line of why, then the fields. */
 function FormSection({
@@ -301,20 +265,27 @@ function RewardCard({
 
       <CardContent sx={{ flexGrow: 1, p: { xs: 2, sm: 2.5 }, pb: 1.5 }}>
         <Stack direction="row" spacing={1} alignItems="flex-start">
+          {/* No uploaded art? Fall back to the clay illustration for this kind of reward. */}
+          {!reward.imageUrl && (
+            <Art
+              src={rewardFallbackArt(reward.name, reward.type)}
+              size={40}
+              sx={{ flexShrink: 0, mt: -0.25 }}
+            />
+          )}
           <Typography
             variant="subtitle1"
             sx={{ fontWeight: 700, flexGrow: 1, minWidth: 0, wordBreak: 'break-word' }}
           >
             {reward.name}
           </Typography>
-          <Chip
-            size="small"
-            variant="outlined"
-            label={TYPE_LABELS[reward.type] ?? reward.type}
-            sx={{ flexShrink: 0 }}
-          />
+          <Label variant="outlined" sx={{ flexShrink: 0 }}>
+            {TYPE_LABELS[reward.type] ?? reward.type}
+          </Label>
           {inactive && (
-            <Chip size="small" color="default" label="Inactive" sx={{ flexShrink: 0 }} />
+            <Label color="default" sx={{ flexShrink: 0 }}>
+              Inactive
+            </Label>
           )}
         </Stack>
 
@@ -371,19 +342,10 @@ function RewardCard({
           </Box>
         )}
 
-        <Stack
-          direction="row"
-          alignItems="center"
-          sx={{ mt: 1.25, gap: 1, flexWrap: 'wrap', typography: 'caption', color: 'text.secondary' }}
-        >
-          <Box component="span">{trackLabel(reward.track)}</Box>
-          {!stocked && (
-            <>
-              <Dot />
-              <Box component="span">Unlimited stock</Box>
-            </>
-          )}
-        </Stack>
+        <MetaLine
+          sx={{ mt: 1.25, rowGap: 0.5 }}
+          parts={[trackLabel(reward.track), !stocked && 'Unlimited stock']}
+        />
       </CardContent>
 
       <Stack
@@ -535,9 +497,9 @@ function RewardsBody() {
       <Box>
         {rows.length > 0 && (
           <SectionHead
-            title={filtered ? 'Matching rewards' : 'Catalog'}
-            count={`${liveCount} live of ${rows.length}`}
-            description="Cash, goodies, certificates and perks — one catalog covers all three unlock paths."
+            label={filtered ? 'Matching rewards' : 'Catalog'}
+            count={rows.length}
+            caption={`${liveCount} live · Cash, goodies, certificates and perks — one catalog covers all three unlock paths.`}
           />
         )}
 
@@ -545,31 +507,36 @@ function RewardsBody() {
           loading={rewards.loading && !rewards.data}
           error={rewards.error && !rewards.data ? rewards.error : undefined}
           onRetry={rewards.reload}
-          isEmpty={!rows.length}
-          emptyTitle={filtered ? 'No rewards match these filters' : 'No rewards in the catalog'}
-          emptyDescription={
-            filtered
-              ? 'Clear the unlock type or track filter, or add a reward for this audience.'
-              : 'Add cash stipends, goodies and certificates — one catalog covers all three unlock paths.'
-          }
-          emptyAction={
-            <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
-              New reward
-            </Button>
-          }
           skeletonRows={3}
         >
-          <Grid container spacing={2}>
-            {rows.map((r) => (
-              <Grid key={r._id} size={{ xs: 12, sm: 6 }}>
-                <RewardCard
-                  reward={r}
-                  onEdit={() => openEdit(r)}
-                  onDelete={() => setDeleting(r)}
-                />
-              </Grid>
-            ))}
-          </Grid>
+          {rows.length === 0 ? (
+            <EmptyState
+              art={filtered ? ART.empty.search : ART.empty.rewards}
+              title={filtered ? 'No rewards match these filters' : 'No rewards in the catalog'}
+              description={
+                filtered
+                  ? 'Clear the unlock type or track filter, or add a reward for this audience.'
+                  : 'Add cash stipends, goodies and certificates — one catalog covers all three unlock paths.'
+              }
+              action={
+                <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+                  New reward
+                </Button>
+              }
+            />
+          ) : (
+            <Grid container spacing={2}>
+              {rows.map((r) => (
+                <Grid key={r._id} size={{ xs: 12, sm: 6 }}>
+                  <RewardCard
+                    reward={r}
+                    onEdit={() => openEdit(r)}
+                    onDelete={() => setDeleting(r)}
+                  />
+                </Grid>
+              ))}
+            </Grid>
+          )}
         </DataState>
       </Box>
 

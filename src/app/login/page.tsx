@@ -1,26 +1,27 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Fade from '@mui/material/Fade';
-import IconButton from '@mui/material/IconButton';
 import InputAdornment from '@mui/material/InputAdornment';
+import Link from '@mui/material/Link';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { alpha } from '@mui/material/styles';
 import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded';
 import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded';
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
 import EmojiEventsRoundedIcon from '@mui/icons-material/EmojiEventsRounded';
 import TaskAltRoundedIcon from '@mui/icons-material/TaskAltRounded';
-import Logo from '@/components/Logo';
+import { AMBER_HAIRLINE, EYEBROW, INK, NIGHT_SKY, STARFIELD } from '@/components/night';
+import { ART } from '@/lib/art';
 import { useAuth } from '@/lib/auth/AuthContext';
+import { FONT_DISPLAY, gradientTokens, textGradient } from '@/theme';
 import {
   adminPasswordLogin,
   adminVerifyTwoFa,
@@ -43,6 +44,110 @@ const SELLING_POINTS = [
   { icon: EmojiEventsRoundedIcon, text: 'Track points, stipend and rewards live' },
 ];
 
+/** Only a fallback — the real length comes from send-email-otp (4 for some accounts). */
+const DEFAULT_OTP_LENGTH = 6;
+const RESEND_SECONDS = 30;
+const SUPPORT_EMAIL = 'support@talkdrill.com';
+
+/**
+ * One box per digit over a single `otp` string: paste fills them all, backspace
+ * on an empty box walks left, and any digit advances right. `length` is driven
+ * by the backend's `otpLength` — hardcoding it locks out 4-digit accounts.
+ */
+function CodeBoxes({
+  value,
+  onChange,
+  onEnter,
+  disabled,
+  length,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  onEnter: () => void;
+  disabled?: boolean;
+  length: number;
+}) {
+  const refs = useRef<(HTMLInputElement | null)[]>([]);
+  const digits = Array.from({ length }, (_, i) => value[i] ?? '');
+
+  const focus = (i: number) => {
+    const el = refs.current[Math.max(0, Math.min(length - 1, i))];
+    el?.focus();
+    el?.select();
+  };
+
+  const write = (i: number, raw: string) => {
+    const clean = raw.replace(/\D/g, '');
+    if (!clean) return;
+    // Clamp to the end of what is typed so a click on a far box never leaves a hole.
+    const at = Math.min(i, value.length);
+    const next = digits.slice();
+    // A paste (or an autofilled OTP) lands in one box but fills the rest.
+    clean.split('').forEach((ch, k) => {
+      if (at + k < length) next[at + k] = ch;
+    });
+    onChange(next.join('').slice(0, length));
+    focus(at + clean.length);
+  };
+
+  return (
+    <Stack direction="row" spacing={{ xs: 0.75, sm: 1 }} justifyContent="space-between">
+      {digits.map((digit, i) => (
+        <TextField
+          key={i}
+          value={digit}
+          disabled={disabled}
+          autoFocus={i === 0}
+          inputRef={(el: HTMLInputElement | null) => {
+            refs.current[i] = el;
+          }}
+          onChange={(e) => write(i, e.target.value)}
+          onFocus={(e) => e.target.select()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              onEnter();
+              return;
+            }
+            if (e.key === 'Backspace') {
+              e.preventDefault();
+              // Truncate from the caret — an OTP is one contiguous string, never gappy.
+              const cut = digit ? i : Math.max(0, i - 1);
+              onChange(value.slice(0, cut));
+              focus(cut);
+              return;
+            }
+            if (e.key === 'ArrowLeft') focus(i - 1);
+            if (e.key === 'ArrowRight') focus(i + 1);
+          }}
+          onPaste={(e) => {
+            e.preventDefault();
+            write(0, e.clipboardData.getData('text'));
+          }}
+          slotProps={{
+            htmlInput: {
+              inputMode: 'numeric',
+              autoComplete: i === 0 ? 'one-time-code' : 'off',
+              'aria-label': `Digit ${i + 1}`,
+              maxLength: length,
+              style: {
+                fontSize: 22,
+                fontWeight: 700,
+                textAlign: 'center',
+                padding: '14px 0',
+              },
+            },
+          }}
+          sx={{
+            flex: 1,
+            minWidth: 0,
+            '& .MuiOutlinedInput-root': { borderRadius: 2 },
+          }}
+        />
+      ))}
+    </Stack>
+  );
+}
+
 export default function LoginPage() {
   const { ready, auth, login } = useAuth();
   const router = useRouter();
@@ -56,11 +161,19 @@ export default function LoginPage() {
   const [otp, setOtp] = useState('');
   const [password, setPassword] = useState('');
   const [challenge, setChallenge] = useState<TwoFaChallenge | null>(null);
+  const [resendIn, setResendIn] = useState(0);
+  const [otpLength, setOtpLength] = useState(DEFAULT_OTP_LENGTH);
 
   useEffect(() => {
     if (!ready || !auth) return;
     router.replace(auth.principal === 'admin' ? '/admin' : '/tasks');
   }, [ready, auth, router]);
+
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const id = setTimeout(() => setResendIn((s) => s - 1), 1000);
+    return () => clearTimeout(id);
+  }, [resendIn]);
 
   const run = async (fn: () => Promise<void>) => {
     setError(null);
@@ -83,8 +196,10 @@ export default function LoginPage() {
         setStep('password');
         return;
       }
-      await sendEmailOtp(trimmed);
+      const { otpLength: len } = await sendEmailOtp(trimmed);
+      setOtpLength(len);
       setStep('otp');
+      setResendIn(RESEND_SECONDS);
       setInfo(`Code sent to ${trimmed}`);
     });
 
@@ -110,6 +225,17 @@ export default function LoginPage() {
       router.replace('/admin');
     });
 
+  /** Same send endpoint as step one — nothing about the flow changes. */
+  const handleResend = () =>
+    run(async () => {
+      const trimmed = email.trim();
+      const { otpLength: len } = await sendEmailOtp(trimmed);
+      setOtpLength(len);
+      setOtp('');
+      setResendIn(RESEND_SECONDS);
+      setInfo(`Code sent to ${trimmed}`);
+    });
+
   const restart = () => {
     setStep('email');
     setOtp('');
@@ -117,6 +243,7 @@ export default function LoginPage() {
     setChallenge(null);
     setError(null);
     setInfo(null);
+    setResendIn(0);
   };
 
   const heading = useMemo(() => {
@@ -131,24 +258,26 @@ export default function LoginPage() {
     }
   }, [step]);
 
+  const requiredCodeLength = step === 'twofa' ? DEFAULT_OTP_LENGTH : otpLength;
+
+  const submitCode = useCallback(() => {
+    if (otp.trim().length < requiredCodeLength) return;
+    if (step === 'otp') handleOtp();
+    else handleTwoFa();
+    // handleOtp/handleTwoFa are stable enough for this callback's purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [otp, step, requiredCodeLength]);
+
+  // Admin 2FA codes are always 6; intern OTP length is whatever send-email-otp said.
+  const codeLength = step === 'twofa' ? DEFAULT_OTP_LENGTH : otpLength;
+
   const codeField = (
-    <TextField
-      label="Verification code"
+    <CodeBoxes
       value={otp}
-      onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-      autoFocus
-      slotProps={{
-        htmlInput: {
-          inputMode: 'numeric',
-          autoComplete: 'one-time-code',
-          style: { fontSize: 24, letterSpacing: '0.4em', fontWeight: 700, textAlign: 'center' },
-        },
-      }}
-      onKeyDown={(e) => {
-        if (e.key !== 'Enter' || otp.trim().length < 4) return;
-        if (step === 'otp') handleOtp();
-        else handleTwoFa();
-      }}
+      onChange={setOtp}
+      onEnter={submitCode}
+      disabled={busy}
+      length={codeLength}
     />
   );
 
@@ -161,7 +290,7 @@ export default function LoginPage() {
         bgcolor: 'background.paper',
       }}
     >
-      {/* Brand panel — desktop only; the phone gets a compact header instead. */}
+      {/* Brand panel — desktop only; the phone gets a compact night band instead. */}
       <Box
         sx={{
           display: { xs: 'none', md: 'flex' },
@@ -170,24 +299,13 @@ export default function LoginPage() {
           p: 6,
           position: 'relative',
           overflow: 'hidden',
-          color: 'common.white',
-          background: (t) =>
-            `linear-gradient(150deg, ${t.palette.primary.darker} 0%, ${t.palette.primary.dark} 45%, ${t.palette.primary.main} 100%)`,
-          '&::after': {
-            // Soft light bloom, echoing the gradient in the logo mark.
-            content: '""',
-            position: 'absolute',
-            width: 620,
-            height: 620,
-            right: -220,
-            top: -180,
-            borderRadius: '50%',
-            background: (t) =>
-              `radial-gradient(circle, ${alpha(t.palette.common.white, 0.16)} 0%, transparent 65%)`,
-          },
+          color: '#fff',
+          background: NIGHT_SKY,
+          '&::before': STARFIELD,
+          '&::after': AMBER_HAIRLINE,
         }}
       >
-        {/* White lockup reads correctly on the deep violet panel. */}
+        {/* White lockup reads correctly on the night panel. */}
         <Box
           component="img"
           src="/logo/Talk Drill-White-PNG.png"
@@ -196,174 +314,272 @@ export default function LoginPage() {
         />
 
         <Stack spacing={3} sx={{ position: 'relative', zIndex: 1, maxWidth: 460 }}>
-          <Typography variant="h2" sx={{ color: 'inherit' }}>
-            Do the work.
-            <br />
-            Earn the rewards.
-          </Typography>
-          <Typography sx={{ opacity: 0.85, fontSize: 17, lineHeight: 1.6 }}>
+          <Box>
+            <Typography sx={{ ...EYEBROW, color: INK.amber, mb: 1.5 }}>
+              TalkDrill Internships
+            </Typography>
+            <Typography
+              component="h1"
+              sx={{
+                fontFamily: FONT_DISPLAY,
+                fontWeight: 600,
+                fontSize: 'clamp(2.4rem, 3.4vw, 3.4rem)',
+                lineHeight: 1.08,
+                letterSpacing: '-0.02em',
+              }}
+            >
+              Do the work.
+              <br />
+              <Box component="span" sx={textGradient(gradientTokens.secondary)}>
+                Earn the rewards.
+              </Box>
+            </Typography>
+          </Box>
+          <Typography sx={{ color: INK.muted, fontSize: 17, lineHeight: 1.6 }}>
             The TalkDrill internship portal for Campus Ambassadors, Content Creators and the Growth
             team.
           </Typography>
           <Stack spacing={1.5} sx={{ pt: 1 }}>
             {SELLING_POINTS.map(({ icon: Icon, text }) => (
               <Stack key={text} direction="row" spacing={1.5} alignItems="center">
-                <Icon sx={{ fontSize: 20, opacity: 0.9 }} />
-                <Typography sx={{ opacity: 0.9, fontSize: 15 }}>{text}</Typography>
+                <Icon sx={{ fontSize: 20, color: INK.amber }} />
+                <Typography sx={{ color: INK.soft, fontSize: 15 }}>{text}</Typography>
               </Stack>
             ))}
           </Stack>
         </Stack>
 
-        <Typography variant="caption" sx={{ opacity: 0.6, position: 'relative', zIndex: 1 }}>
+        <Typography variant="caption" sx={{ color: INK.faint, position: 'relative', zIndex: 1 }}>
           © {new Date().getFullYear()} TalkDrill
         </Typography>
+
+        <Box
+          component="img"
+          src={ART.mascot.rocket}
+          alt=""
+          aria-hidden
+          sx={{
+            position: 'absolute',
+            right: 24,
+            bottom: 8,
+            width: 150,
+            height: 150,
+            objectFit: 'contain',
+            pointerEvents: 'none',
+            userSelect: 'none',
+            zIndex: 1,
+          }}
+        />
       </Box>
 
       {/* Form panel */}
       <Box
         sx={{
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          p: { xs: 3, sm: 5 },
+          flexDirection: 'column',
           bgcolor: { xs: 'background.paper', md: 'background.default' },
         }}
       >
-        <Box sx={{ width: '100%', maxWidth: 400 }}>
-          <Box sx={{ display: { md: 'none' }, mb: 4 }}>
-            <Logo variant="full" height={30} />
-          </Box>
+        {/* Phone brand band — the same night surface, compressed. */}
+        <Box
+          sx={{
+            display: { xs: 'flex', md: 'none' },
+            alignItems: 'center',
+            position: 'relative',
+            overflow: 'hidden',
+            height: 96,
+            flexShrink: 0,
+            px: 3,
+            borderRadius: '0 0 24px 24px',
+            background: NIGHT_SKY,
+            color: '#fff',
+            '&::before': STARFIELD,
+            '&::after': AMBER_HAIRLINE,
+          }}
+        >
+          <Stack
+            spacing={0.75}
+            sx={{ position: 'relative', zIndex: 1, height: '100%', justifyContent: 'center' }}
+          >
+            <Box
+              component="img"
+              src="/logo/Talk Drill-White-PNG.png"
+              alt="TalkDrill"
+              sx={{ height: 26, width: 'auto', alignSelf: 'flex-start' }}
+            />
+            <Typography sx={{ color: INK.muted, fontSize: 13 }}>
+              Do the work. Earn the rewards.
+            </Typography>
+          </Stack>
+        </Box>
 
-          <Card sx={{ boxShadow: { xs: 'none', md: undefined }, border: { xs: 'none', md: undefined } }}>
-            <CardContent sx={{ p: { xs: 0, md: 4 } }}>
-              <Stack spacing={0.75} sx={{ mb: 3 }}>
-                <Typography variant="h4">{heading.title}</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {heading.sub}
-                </Typography>
-              </Stack>
+        <Box
+          sx={{
+            flexGrow: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            p: { xs: 3, sm: 5 },
+          }}
+        >
+          <Box sx={{ width: '100%', maxWidth: 400 }}>
+            <Card
+              sx={{ boxShadow: { xs: 'none', md: undefined }, border: { xs: 'none', md: undefined } }}
+            >
+              <CardContent sx={{ p: { xs: 0, md: 4 } }}>
+                <Stack spacing={0.75} sx={{ mb: 3 }}>
+                  <Typography variant="h4">{heading.title}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {heading.sub}
+                  </Typography>
+                </Stack>
 
-              {error && (
-                <Alert severity="error" sx={{ mb: 2.5 }}>
-                  {error}
-                </Alert>
-              )}
-              {info && !error && (
-                <Alert severity="success" icon={false} sx={{ mb: 2.5 }}>
-                  {info}
-                </Alert>
-              )}
+                {error && (
+                  <Alert severity="error" sx={{ mb: 2.5 }}>
+                    {error}
+                  </Alert>
+                )}
+                {info && !error && (
+                  <Alert severity="success" icon={false} sx={{ mb: 2.5 }}>
+                    {info}
+                  </Alert>
+                )}
 
-              <Fade in key={step}>
-                <Box>
-                  {step === 'email' && (
-                    <Stack spacing={2.5}>
-                      <TextField
-                        label="Email address"
-                        type="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        autoFocus
-                        autoComplete="email"
-                        onKeyDown={(e) => e.key === 'Enter' && email.trim() && handleEmail()}
-                        slotProps={{
-                          input: {
-                            endAdornment: (
-                              <InputAdornment position="end">
-                                <ArrowForwardRoundedIcon
-                                  fontSize="small"
-                                  sx={{ color: 'text.disabled' }}
-                                />
-                              </InputAdornment>
-                            ),
-                          },
-                        }}
-                      />
-                      <Button
-                        variant="contained"
-                        size="large"
-                        disabled={busy || !email.trim()}
-                        onClick={handleEmail}
-                      >
-                        {busy ? 'Just a moment…' : 'Continue'}
-                      </Button>
-                    </Stack>
-                  )}
+                {/* Fixed floor so the card does not jump between steps. */}
+                <Box sx={{ minHeight: 320 }}>
+                  <Fade in key={step}>
+                    <Box>
+                      {step === 'email' && (
+                        <Stack spacing={2.5}>
+                          <TextField
+                            label="Email address"
+                            type="email"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            autoFocus
+                            autoComplete="email"
+                            onKeyDown={(e) => e.key === 'Enter' && email.trim() && handleEmail()}
+                            slotProps={{
+                              input: {
+                                endAdornment: (
+                                  <InputAdornment position="end">
+                                    <ArrowForwardRoundedIcon
+                                      fontSize="small"
+                                      sx={{ color: 'text.disabled' }}
+                                    />
+                                  </InputAdornment>
+                                ),
+                              },
+                            }}
+                          />
+                          <Button
+                            variant="contained"
+                            size="large"
+                            disabled={busy || !email.trim()}
+                            onClick={handleEmail}
+                          >
+                            {busy ? 'Just a moment…' : 'Continue'}
+                          </Button>
+                        </Stack>
+                      )}
 
-                  {step === 'otp' && (
-                    <Stack spacing={2.5}>
-                      {codeField}
-                      <Button
-                        variant="contained"
-                        size="large"
-                        disabled={busy || otp.trim().length < 4}
-                        onClick={handleOtp}
-                      >
-                        {busy ? 'Verifying…' : 'Sign in'}
-                      </Button>
-                    </Stack>
-                  )}
+                      {step === 'otp' && (
+                        <Stack spacing={2.5}>
+                          {codeField}
+                          <Button
+                            variant="contained"
+                            size="large"
+                            disabled={busy || otp.trim().length < requiredCodeLength}
+                            onClick={handleOtp}
+                          >
+                            {busy ? 'Verifying…' : 'Sign in'}
+                          </Button>
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{ textAlign: 'center' }}
+                          >
+                            {resendIn > 0 ? (
+                              <>Resend code in {resendIn}s</>
+                            ) : (
+                              <Link
+                                component="button"
+                                type="button"
+                                onClick={handleResend}
+                                disabled={busy}
+                                sx={{ fontSize: 'inherit', fontWeight: 700 }}
+                              >
+                                Resend code
+                              </Link>
+                            )}
+                          </Typography>
+                        </Stack>
+                      )}
 
-                  {step === 'password' && (
-                    <Stack spacing={2.5}>
-                      <TextField
-                        label="Password"
-                        type="password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        autoFocus
-                        autoComplete="current-password"
-                        onKeyDown={(e) => e.key === 'Enter' && password && handlePassword()}
-                      />
-                      <Button
-                        variant="contained"
-                        size="large"
-                        disabled={busy || !password}
-                        onClick={handlePassword}
-                      >
-                        {busy ? 'Checking…' : 'Continue'}
-                      </Button>
-                    </Stack>
-                  )}
+                      {step === 'password' && (
+                        <Stack spacing={2.5}>
+                          <TextField
+                            label="Password"
+                            type="password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            autoFocus
+                            autoComplete="current-password"
+                            onKeyDown={(e) => e.key === 'Enter' && password && handlePassword()}
+                          />
+                          <Button
+                            variant="contained"
+                            size="large"
+                            disabled={busy || !password}
+                            onClick={handlePassword}
+                          >
+                            {busy ? 'Checking…' : 'Continue'}
+                          </Button>
+                        </Stack>
+                      )}
 
-                  {step === 'twofa' && (
-                    <Stack spacing={2.5}>
-                      {codeField}
-                      <Button
-                        variant="contained"
-                        size="large"
-                        disabled={busy || otp.trim().length < 4}
-                        onClick={handleTwoFa}
-                      >
-                        {busy ? 'Verifying…' : 'Sign in'}
-                      </Button>
-                    </Stack>
+                      {step === 'twofa' && (
+                        <Stack spacing={2.5}>
+                          {codeField}
+                          <Button
+                            variant="contained"
+                            size="large"
+                            disabled={busy || otp.trim().length < requiredCodeLength}
+                            onClick={handleTwoFa}
+                          >
+                            {busy ? 'Verifying…' : 'Sign in'}
+                          </Button>
+                        </Stack>
+                      )}
+                    </Box>
+                  </Fade>
+
+                  {step !== 'email' && (
+                    <Button
+                      size="small"
+                      startIcon={<ArrowBackRoundedIcon />}
+                      disabled={busy}
+                      onClick={restart}
+                      sx={{ mt: 2, color: 'text.secondary' }}
+                    >
+                      Use a different email
+                    </Button>
                   )}
                 </Box>
-              </Fade>
+              </CardContent>
+            </Card>
 
-              {step !== 'email' && (
-                <Button
-                  size="small"
-                  startIcon={<ArrowBackRoundedIcon />}
-                  disabled={busy}
-                  onClick={restart}
-                  sx={{ mt: 2, color: 'text.secondary' }}
-                >
-                  Use a different email
-                </Button>
-              )}
-            </CardContent>
-          </Card>
-
-          <Typography
-            variant="caption"
-            color="text.secondary"
-            sx={{ display: 'block', textAlign: 'center', mt: 3 }}
-          >
-            Trouble signing in? Message the TalkDrill team.
-          </Typography>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: 'block', textAlign: 'center', mt: 3 }}
+            >
+              Trouble signing in?{' '}
+              <Link href={`mailto:${SUPPORT_EMAIL}`} sx={{ fontWeight: 700 }}>
+                {SUPPORT_EMAIL}
+              </Link>
+            </Typography>
+          </Box>
         </Box>
       </Box>
     </Box>

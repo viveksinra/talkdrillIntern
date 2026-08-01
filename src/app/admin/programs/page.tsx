@@ -7,7 +7,6 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
-import Chip from '@mui/material/Chip';
 import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
@@ -27,6 +26,11 @@ import EditIcon from '@mui/icons-material/Edit';
 import GroupAddIcon from '@mui/icons-material/GroupAdd';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { DataState, errorMessage } from '@/components/DataStates';
+import EmptyState from '@/components/EmptyState';
+import Label from '@/components/Label';
+import MetaLine from '@/components/MetaLine';
+import SectionHead from '@/components/SectionHead';
+import { ART } from '@/lib/art';
 import {
   createProgram,
   deleteProgram,
@@ -73,47 +77,6 @@ const trackLabel = (track: Track | null | undefined) =>
   track ? TRACK_LABELS[track] : 'Any track';
 
 // ── small layout atoms ───────────────────────────────────────────────────
-
-function Dot() {
-  return (
-    <Box component="span" sx={{ color: 'text.disabled' }}>
-      ·
-    </Box>
-  );
-}
-
-/** Typographic section head — never a filled slab competing with the cards under it. */
-function SectionHead({
-  title,
-  count,
-  description,
-}: {
-  title: string;
-  count?: string;
-  description: string;
-}) {
-  return (
-    <Box sx={{ px: 0.5, mb: 1.5 }}>
-      <Stack direction="row" alignItems="baseline" spacing={1}>
-        <Typography variant="overline" sx={{ color: 'primary.main' }}>
-          {title}
-        </Typography>
-        {count && (
-          <Typography
-            className="tnum"
-            variant="caption"
-            sx={{ color: 'text.disabled', fontWeight: 600 }}
-          >
-            {count}
-          </Typography>
-        )}
-      </Stack>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-        {description}
-      </Typography>
-    </Box>
-  );
-}
 
 /** Field group inside a dialog: an overline label, one line of why, then the fields. */
 function FormSection({
@@ -417,32 +380,20 @@ function ProgramCard({
           >
             {program.name}
           </Typography>
-          <Chip
-            size="small"
-            color={inactive ? 'default' : 'success'}
-            variant={inactive ? 'outlined' : 'filled'}
-            label={inactive ? 'Inactive' : 'Active'}
-            sx={{ flexShrink: 0 }}
-          />
+          <Label color={inactive ? 'default' : 'success'} sx={{ flexShrink: 0 }}>
+            {inactive ? 'Inactive' : 'Active'}
+          </Label>
         </Stack>
 
-        <Stack
-          direction="row"
-          alignItems="center"
-          sx={{ mt: 0.5, gap: 1, flexWrap: 'wrap', typography: 'caption', color: 'text.secondary' }}
-        >
-          <Box component="span">/{program.slug}</Box>
-          <Dot />
-          <Box component="span">{trackLabel(program.track)}</Box>
-          {(program.startDate || program.endDate) && (
-            <>
-              <Dot />
-              <Box component="span">
-                {fmtDate(program.startDate)} → {fmtDate(program.endDate)}
-              </Box>
-            </>
-          )}
-        </Stack>
+        <MetaLine
+          sx={{ mt: 0.5, rowGap: 0.5 }}
+          parts={[
+            `/${program.slug}`,
+            trackLabel(program.track),
+            (program.startDate || program.endDate) &&
+              `${fmtDate(program.startDate)} → ${fmtDate(program.endDate)}`,
+          ]}
+        />
 
         {program.description && (
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
@@ -678,9 +629,9 @@ function ProgramsBody() {
       <Box>
         {rows.length > 0 && (
           <SectionHead
-            title="Batches"
-            count={`${activeCount} active of ${rows.length} · ${fmtNumber(internTotal)} interns`}
-            description="A program holds enrolment, the leaderboard switch and the video reward tiers for one cohort."
+            label="Batches"
+            count={rows.length}
+            caption={`${activeCount} active · ${fmtNumber(internTotal)} interns · A program holds enrolment, the leaderboard switch and the video reward tiers for one cohort.`}
           />
         )}
 
@@ -688,35 +639,40 @@ function ProgramsBody() {
           loading={programs.loading && !programs.data}
           error={programs.error && !programs.data ? programs.error : undefined}
           onRetry={programs.reload}
-          isEmpty={!rows.length}
-          emptyTitle="No programs yet"
-          emptyDescription="A program is one intern batch — it holds enrolment, the leaderboard switch and the video tiers."
-          emptyAction={
-            <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
-              New program
-            </Button>
-          }
           skeletonRows={2}
         >
-          <Grid container spacing={2}>
-            {rows.map((p) => (
-              <Grid key={p._id} size={{ xs: 12, sm: 6 }}>
-                <ProgramCard
-                  program={p}
-                  toggling={togglingId === p._id}
-                  onToggleLeaderboard={() => toggleLeaderboard(p)}
-                  onEdit={() => openEdit(p)}
-                  onDelete={() => setDeleting(p)}
-                  onEnrol={() => {
-                    setEnrollFor(p);
-                    setEnrollText('');
-                    setEnrollError(null);
-                    setEnrollResult(null);
-                  }}
-                />
-              </Grid>
-            ))}
-          </Grid>
+          {rows.length === 0 ? (
+            <EmptyState
+              art={ART.empty.inbox}
+              title="No programs yet"
+              description="A program is one intern batch — it holds enrolment, the leaderboard switch and the video tiers."
+              action={
+                <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+                  New program
+                </Button>
+              }
+            />
+          ) : (
+            <Grid container spacing={2}>
+              {rows.map((p) => (
+                <Grid key={p._id} size={{ xs: 12, sm: 6 }}>
+                  <ProgramCard
+                    program={p}
+                    toggling={togglingId === p._id}
+                    onToggleLeaderboard={() => toggleLeaderboard(p)}
+                    onEdit={() => openEdit(p)}
+                    onDelete={() => setDeleting(p)}
+                    onEnrol={() => {
+                      setEnrollFor(p);
+                      setEnrollText('');
+                      setEnrollError(null);
+                      setEnrollResult(null);
+                    }}
+                  />
+                </Grid>
+              ))}
+            </Grid>
+          )}
         </DataState>
       </Box>
 

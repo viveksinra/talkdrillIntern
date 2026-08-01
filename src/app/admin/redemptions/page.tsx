@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import React, { useState } from 'react';
+import { useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -21,9 +21,15 @@ import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import Art from '@/components/Art';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { DataState, errorMessage } from '@/components/DataStates';
-import StatusChip from '@/components/StatusChip';
+import EmptyState from '@/components/EmptyState';
+import Label, { type LabelColor } from '@/components/Label';
+import MetaLine from '@/components/MetaLine';
+import SectionHead from '@/components/SectionHead';
+import { statusMeta } from '@/components/StatusChip';
+import { ART, rewardFallbackArt } from '@/lib/art';
 import {
   approveRedemption,
   fulfillRedemption,
@@ -101,6 +107,16 @@ interface RewardRef {
   unlockType?: string;
   pointsCost?: number;
   cashValue?: number;
+  imageUrl?: string;
+}
+
+/** "2026-08" → "Aug 2026". Left as-is if it is not a period string. */
+function fmtPeriod(period?: string | null): string | null {
+  if (!period) return null;
+  const m = /^(\d{4})-(\d{2})$/.exec(period);
+  if (!m) return period;
+  const date = new Date(Number(m[1]), Number(m[2]) - 1, 1);
+  return date.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
 }
 
 function rewardOf(r: Redemption): RewardRef | null {
@@ -110,50 +126,6 @@ function rewardOf(r: Redemption): RewardRef | null {
 }
 
 // ── small layout atoms ───────────────────────────────────────────────────
-
-function Dot() {
-  return (
-    <Box component="span" sx={{ color: 'text.disabled' }}>
-      ·
-    </Box>
-  );
-}
-
-/** Typographic section head — never a filled slab competing with the rows under it. */
-function SectionHead({
-  title,
-  count,
-  description,
-  tone = 'primary',
-}: {
-  title: string;
-  count: string;
-  description: string;
-  tone?: 'primary' | 'muted';
-}) {
-  return (
-    <Box sx={{ px: 0.5, mb: 1.5 }}>
-      <Stack direction="row" alignItems="baseline" spacing={1}>
-        <Typography
-          variant="overline"
-          sx={{ color: tone === 'primary' ? 'primary.main' : 'text.secondary' }}
-        >
-          {title}
-        </Typography>
-        <Typography
-          className="tnum"
-          variant="caption"
-          sx={{ color: 'text.disabled', fontWeight: 600 }}
-        >
-          {count}
-        </Typography>
-      </Stack>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-        {description}
-      </Typography>
-    </Box>
-  );
-}
 
 /** The number the payout desk is judged on. */
 function QueueTile({
@@ -266,13 +238,26 @@ function RedemptionCard({
 
           <Box sx={{ flexGrow: 1, minWidth: 0 }}>
             <Stack direction="row" spacing={1} alignItems="flex-start">
+              {/* No uploaded art? Fall back to the clay illustration for this reward. */}
+              {!reward?.imageUrl && (
+                <Art
+                  src={rewardFallbackArt(reward?.name ?? '', reward?.type)}
+                  size={40}
+                  sx={{ flexShrink: 0, mt: -0.25 }}
+                />
+              )}
               <Typography
                 variant="subtitle1"
                 sx={{ fontWeight: 700, flexGrow: 1, minWidth: 0, wordBreak: 'break-word' }}
               >
                 {reward?.name ?? nameOf(item.rewardId)}
               </Typography>
-              <StatusChip status={item.status} sx={{ flexShrink: 0 }} />
+              <Label
+                color={(statusMeta(item.status).color ?? 'default') as LabelColor}
+                sx={{ flexShrink: 0 }}
+              >
+                {statusMeta(item.status).label}
+              </Label>
             </Stack>
 
             <Typography variant="body2" sx={{ mt: 0.25, wordBreak: 'break-word' }}>
@@ -297,51 +282,21 @@ function RedemptionCard({
             </Typography>
 
             {/* Everything the desk does not act on is quiet text, not a chip row. */}
-            <Stack
-              direction="row"
-              alignItems="center"
-              sx={{
-                mt: 1,
-                gap: 1,
-                flexWrap: 'wrap',
-                typography: 'caption',
-                color: 'text.secondary',
-              }}
-            >
-              <Box component="span">{SOURCE_LABELS[item.source] ?? item.source}</Box>
-              {cash > 0 && item.pointsSpent > 0 && (
-                <>
-                  <Dot />
+            <MetaLine
+              sx={{ mt: 1, rowGap: 0.5 }}
+              parts={[
+                SOURCE_LABELS[item.source] ?? item.source,
+                cash > 0 && item.pointsSpent > 0 && (
                   <Box component="span" className="tnum">
                     {fmtNumber(item.pointsSpent)} pts spent
                   </Box>
-                </>
-              )}
-              {item.period && (
-                <>
-                  <Dot />
-                  <Box component="span" className="tnum">
-                    {item.period}
-                  </Box>
-                </>
-              )}
-              <Dot />
-              <Box component="span">
-                Requested {fmtDateTime(item.requestedAt || item.createdAt)}
-              </Box>
-              {item.decidedAt && (
-                <>
-                  <Dot />
-                  <Box component="span">Decided {fmtDateTime(item.decidedAt)}</Box>
-                </>
-              )}
-              {item.fulfilledAt && (
-                <>
-                  <Dot />
-                  <Box component="span">Fulfilled {fmtDateTime(item.fulfilledAt)}</Box>
-                </>
-              )}
-            </Stack>
+                ),
+                fmtPeriod(item.period),
+                `Requested ${fmtDateTime(item.requestedAt || item.createdAt)}`,
+                item.decidedAt && `Decided ${fmtDateTime(item.decidedAt)}`,
+                item.fulfilledAt && `Fulfilled ${fmtDateTime(item.fulfilledAt)}`,
+              ]}
+            />
 
             {item.fulfillmentNote && (
               <Box
@@ -575,42 +530,46 @@ function RedemptionsBody() {
         loading={queue.loading && !queue.data}
         error={queue.error && !queue.data ? queue.error : undefined}
         onRetry={queue.reload}
-        isEmpty={!rows.length}
-        emptyTitle={status === NEEDS_ACTION ? 'Nothing to pay out' : 'No redemptions here'}
-        emptyDescription={
-          status === NEEDS_ACTION
-            ? 'Every approved reward has a transfer reference on file. New requests will appear here.'
-            : 'No redemptions match this filter — try "All statuses".'
-        }
         skeletonRows={3}
       >
-        <Stack spacing={3}>
-          {groups.map((group) => (
-            <Box key={group.key}>
-              <SectionHead
-                title={GROUP_COPY[group.key].title}
-                count={`${group.items.length}`}
-                description={GROUP_COPY[group.key].description}
-                tone={group.key === 'approved' || group.key === 'requested' ? 'primary' : 'muted'}
-              />
-              <Stack spacing={1.5}>
-                {group.items.map((item) => (
-                  <RedemptionCard
-                    key={item._id}
-                    item={item}
-                    onApprove={() => setApproving(item)}
-                    onReject={() => setRejecting(item)}
-                    onFulfil={() => {
-                      setNote('');
-                      setFulfilError(null);
-                      setFulfilling(item);
-                    }}
-                  />
-                ))}
-              </Stack>
-            </Box>
-          ))}
-        </Stack>
+        {rows.length === 0 ? (
+          <EmptyState
+            art={status === NEEDS_ACTION ? ART.empty.allDone : ART.empty.search}
+            title={status === NEEDS_ACTION ? 'Nothing to pay out' : 'No redemptions here'}
+            description={
+              status === NEEDS_ACTION
+                ? 'Every approved reward has a transfer reference on file. New requests will appear here.'
+                : 'No redemptions match this filter — try "All statuses".'
+            }
+          />
+        ) : (
+          <Stack spacing={3}>
+            {groups.map((group) => (
+              <Box key={group.key}>
+                <SectionHead
+                  label={GROUP_COPY[group.key].title}
+                  count={group.items.length}
+                  caption={GROUP_COPY[group.key].description}
+                />
+                <Stack spacing={1.5}>
+                  {group.items.map((item) => (
+                    <RedemptionCard
+                      key={item._id}
+                      item={item}
+                      onApprove={() => setApproving(item)}
+                      onReject={() => setRejecting(item)}
+                      onFulfil={() => {
+                        setNote('');
+                        setFulfilError(null);
+                        setFulfilling(item);
+                      }}
+                    />
+                  ))}
+                </Stack>
+              </Box>
+            ))}
+          </Stack>
+        )}
       </DataState>
 
       <ConfirmDialog

@@ -1,17 +1,18 @@
 'use client';
 
 import React from 'react';
-import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
-import Divider from '@mui/material/Divider';
-import LinearProgress from '@mui/material/LinearProgress';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
+import { useTheme } from '@mui/material/styles';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import type { EligibilityProgress, EligibilityState } from '@/lib/api/types';
-import StatusChip from './StatusChip';
+import Label, { type LabelColor } from './Label';
+import MetaLine from './MetaLine';
+import ProgressRing from './ProgressRing';
+import { statusMeta } from './StatusChip';
 
 /**
  * The "what do I still need for the stipend?" component. Interns judge the whole
@@ -36,65 +37,89 @@ function ratio(row: EligibilityProgress): number | null {
   return Math.max(0, Math.min(100, (cur / req) * 100));
 }
 
+/**
+ * One condition per row: a 44px completion ring on the left carrying the two
+ * numbers that matter, the label on the right. Non-numeric conditions keep the
+ * alignment with a tick glyph and say plainly whether they are met.
+ */
 function ChecklistRow({ row }: { row: EligibilityProgress }) {
+  const theme = useTheme();
   const pct = ratio(row);
   const numeric = pct !== null;
+  const ringColor = row.met ? theme.palette.success.main : theme.palette.primary.main;
+
   return (
-    <Box sx={{ py: 1.25 }}>
-      <Stack direction="row" spacing={1.25} alignItems="flex-start">
+    <Stack direction="row" spacing={1.5} alignItems="center" sx={{ py: 0.75 }}>
+      {numeric ? (
+        <ProgressRing
+          value={pct as number}
+          size={44}
+          thickness={5}
+          color={ringColor}
+          ariaLabel={row.label}
+        >
+          <Box sx={{ lineHeight: 1 }}>
+            <Box
+              className="tnum"
+              sx={{
+                fontSize: 12,
+                fontWeight: 800,
+                color: row.met ? 'success.main' : 'text.primary',
+              }}
+            >
+              {display(row.current)}
+            </Box>
+            <Box className="tnum" sx={{ fontSize: 9, fontWeight: 700, color: 'text.disabled' }}>
+              /{display(row.required)}
+            </Box>
+          </Box>
+        </ProgressRing>
+      ) : (
         <Box
           sx={{
-            mt: '1px',
+            width: 44,
+            height: 44,
+            flexShrink: 0,
+            display: 'grid',
+            placeItems: 'center',
             color: row.met ? 'success.main' : 'text.disabled',
-            '& svg': { fontSize: 20 },
+            '& svg': { fontSize: 26 },
           }}
         >
           {row.met ? <CheckCircleIcon /> : <RadioButtonUncheckedIcon />}
         </Box>
-        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-          <Stack
-            direction="row"
-            spacing={1}
-            alignItems="baseline"
-            justifyContent="space-between"
-            sx={{ gap: 1 }}
-          >
-            <Typography
-              variant="body2"
-              sx={{ fontWeight: row.met ? 500 : 600, color: row.met ? 'text.secondary' : 'text.primary' }}
-            >
-              {row.label}
-            </Typography>
-            <Typography
-              className="tnum"
-              variant="body2"
-              sx={{ fontWeight: 700, whiteSpace: 'nowrap', color: row.met ? 'success.main' : 'text.primary' }}
-            >
-              {numeric
-                ? `${display(row.current)} / ${display(row.required)}`
-                : display(row.current)}
-            </Typography>
+      )}
+
+      <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+        <Typography
+          variant="body2"
+          sx={{
+            fontWeight: row.met ? 500 : 600,
+            color: row.met ? 'text.secondary' : 'text.primary',
+          }}
+        >
+          {row.label}
+        </Typography>
+        {!numeric && (
+          <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mt: 0.5 }}>
+            {/* A boolean condition used to render nothing under the label. */}
+            <Label color={row.met ? 'success' : 'default'} variant="soft">
+              {row.met ? '✓ Met' : '✗ Not yet'}
+            </Label>
+            {typeof row.current !== 'boolean' && row.current !== null && row.current !== undefined && (
+              <Typography className="tnum" variant="caption" color="text.secondary">
+                {display(row.current)}
+                {row.required !== null && row.required !== undefined && typeof row.required !== 'boolean'
+                  ? ` / ${display(row.required)}`
+                  : ''}
+              </Typography>
+            )}
           </Stack>
-          {numeric && (
-            <LinearProgress
-              variant="determinate"
-              value={pct as number}
-              color={row.met ? 'success' : 'primary'}
-              sx={{ mt: 0.75, height: 6, borderRadius: 3 }}
-            />
-          )}
-        </Box>
-      </Stack>
-    </Box>
+        )}
+      </Box>
+    </Stack>
   );
 }
-
-const REASON_SEVERITY: Record<EligibilityState, 'success' | 'info' | 'warning' | 'error'> = {
-  earned: 'success',
-  eligible: 'success',
-  not_yet_eligible: 'info',
-  forfeited: 'error',
-};
 
 export interface EligibilityChecklistProps {
   status: EligibilityState;
@@ -133,6 +158,7 @@ export default function EligibilityChecklist({
 }: EligibilityChecklistProps) {
   const metCount = progress.filter((p) => p.met).length;
   const periodLabel = formatPeriod(period);
+  const meta = statusMeta(status);
 
   const body = (
     <Stack spacing={1.5} sx={{ p: bare ? 0 : { xs: 2, sm: 2.5 } }}>
@@ -147,36 +173,37 @@ export default function EligibilityChecklist({
           <Typography variant="subtitle1" sx={{ fontWeight: 700, wordBreak: 'break-word' }}>
             {rewardName ?? ruleName ?? 'Reward'}
           </Typography>
-          <Typography variant="caption" color="text.secondary">
-            {[ruleName && rewardName ? ruleName : null, periodLabel, progress.length ? `${metCount} of ${progress.length} done` : null]
-              .filter(Boolean)
-              .join(' · ')}
-          </Typography>
+          <MetaLine
+            parts={[
+              ruleName && rewardName ? ruleName : null,
+              periodLabel,
+              progress.length ? (
+                <Box component="span" className="tnum" key="done">
+                  {metCount} of {progress.length} done
+                </Box>
+              ) : null,
+            ]}
+          />
         </Box>
-        <StatusChip status={status} withIcon />
+        {/* One quiet status pill — never a stack of coloured alerts. */}
+        <Label
+          color={(meta.color ?? 'default') as LabelColor}
+          variant="soft"
+          sx={{ flexShrink: 0 }}
+        >
+          {meta.label}
+        </Label>
       </Stack>
 
       {reason && (
-        <Alert
-          severity={REASON_SEVERITY[status] ?? 'info'}
-          variant={status === 'forfeited' ? 'filled' : 'standard'}
-          sx={{ py: 0.5 }}
-        >
+        <Typography variant="body2" color="text.secondary">
           {reason}
-        </Alert>
+        </Typography>
       )}
 
-      {progress.length > 0 && (
-        <Box>
-          <Divider />
-          {progress.map((row, i) => (
-            <React.Fragment key={`${row.label}-${i}`}>
-              <ChecklistRow row={row} />
-              {i < progress.length - 1 && <Divider />}
-            </React.Fragment>
-          ))}
-        </Box>
-      )}
+      {progress.length > 0 && <Stack spacing={0.5}>{progress.map((row, i) => (
+        <ChecklistRow key={`${row.label}-${i}`} row={row} />
+      ))}</Stack>}
 
       {footer}
     </Stack>

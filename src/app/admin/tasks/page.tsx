@@ -6,7 +6,6 @@ import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Checkbox from '@mui/material/Checkbox';
-import Chip from '@mui/material/Chip';
 import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
@@ -27,6 +26,11 @@ import EditIcon from '@mui/icons-material/Edit';
 import SendIcon from '@mui/icons-material/Send';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { DataState, errorMessage } from '@/components/DataStates';
+import EmptyState from '@/components/EmptyState';
+import Label from '@/components/Label';
+import MetaLine from '@/components/MetaLine';
+import SectionHead from '@/components/SectionHead';
+import { ART } from '@/lib/art';
 import {
   createAssignments,
   createTaskTemplate,
@@ -93,48 +97,6 @@ const trackLabel = (track: Track | null | undefined) =>
   track ? TRACK_LABELS[track] : 'Any track';
 
 // ── small layout atoms ───────────────────────────────────────────────────
-
-/** Quiet middot between two pieces of metadata. */
-function Dot() {
-  return (
-    <Box component="span" sx={{ color: 'text.disabled' }}>
-      ·
-    </Box>
-  );
-}
-
-/** Typographic section head — never a filled slab that competes with the cards. */
-function SectionHead({
-  title,
-  count,
-  description,
-}: {
-  title: string;
-  count?: string;
-  description: string;
-}) {
-  return (
-    <Box sx={{ px: 0.5, mb: 1.5 }}>
-      <Stack direction="row" alignItems="baseline" spacing={1}>
-        <Typography variant="overline" sx={{ color: 'primary.main' }}>
-          {title}
-        </Typography>
-        {count && (
-          <Typography
-            className="tnum"
-            variant="caption"
-            sx={{ color: 'text.disabled', fontWeight: 600 }}
-          >
-            {count}
-          </Typography>
-        )}
-      </Stack>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-        {description}
-      </Typography>
-    </Box>
-  );
-}
 
 /** Field group inside a dialog: an overline label, one line of why, then the fields. */
 function FormSection({
@@ -356,10 +318,14 @@ function TemplateCard({
                 {template.title}
               </Typography>
               {template.isMandatory && (
-                <Chip size="small" color="primary" label="Mandatory" sx={{ flexShrink: 0 }} />
+                <Label color="primary" sx={{ flexShrink: 0 }}>
+                  Mandatory
+                </Label>
               )}
               {inactive && (
-                <Chip size="small" variant="outlined" label="Inactive" sx={{ flexShrink: 0 }} />
+                <Label color="default" sx={{ flexShrink: 0 }}>
+                  Inactive
+                </Label>
               )}
             </Stack>
 
@@ -380,45 +346,21 @@ function TemplateCard({
             )}
 
             {/* Taxonomy as quiet text — six chips in a row read as decoration. */}
-            <Stack
-              direction="row"
-              alignItems="center"
-              sx={{
-                mt: 1.25,
-                gap: 1,
-                flexWrap: 'wrap',
-                typography: 'caption',
-                color: 'text.secondary',
-              }}
-            >
-              <Box component="span">{trackLabel(template.track)}</Box>
-              <Dot />
-              <Box component="span">{CADENCE_LABELS[template.cadence] ?? template.cadence}</Box>
-              <Dot />
-              <Box component="span">
-                {PROOF_LABELS[template.proofType] ?? titleCase(template.proofType)} proof
-              </Box>
-              {template.requiresDashboardProof && (
-                <>
-                  <Dot />
-                  <Box component="span">+ dashboard screenshot</Box>
-                </>
-              )}
-              {template.category && (
-                <>
-                  <Dot />
-                  <Box component="span">{template.category}</Box>
-                </>
-              )}
-              {template.deadline && (
-                <>
-                  <Dot />
+            <MetaLine
+              sx={{ mt: 1.25, rowGap: 0.5 }}
+              parts={[
+                trackLabel(template.track),
+                CADENCE_LABELS[template.cadence] ?? template.cadence,
+                `${PROOF_LABELS[template.proofType] ?? titleCase(template.proofType)} proof`,
+                template.requiresDashboardProof && '+ dashboard screenshot',
+                template.category,
+                template.deadline && (
                   <Box component="span" sx={{ fontWeight: 600, color: 'text.primary' }}>
                     Due {fmtDate(template.deadline)}
                   </Box>
-                </>
-              )}
-            </Stack>
+                ),
+              ]}
+            />
 
             <Typography
               variant="caption"
@@ -630,11 +572,11 @@ function TasksBody() {
       <Box>
         {rows.length > 0 && (
           <SectionHead
-            title={filtered ? 'Matching templates' : 'All templates'}
-            count={`${rows.length} template${rows.length === 1 ? '' : 's'}${
-              mandatoryCount ? ` · ${mandatoryCount} mandatory` : ''
-            }`}
-            description="Each template is a piece of work defined once, then assigned to interns or whole batches."
+            label={filtered ? 'Matching templates' : 'All templates'}
+            count={rows.length}
+            caption={`${
+              mandatoryCount ? `${mandatoryCount} mandatory · ` : ''
+            }Each template is a piece of work defined once, then assigned to interns or whole batches.`}
           />
         )}
 
@@ -642,32 +584,37 @@ function TasksBody() {
           loading={templates.loading && !templates.data}
           error={templates.error && !templates.data ? templates.error : undefined}
           onRetry={templates.reload}
-          isEmpty={!rows.length}
-          emptyTitle={filtered ? 'No templates match these filters' : 'No task templates yet'}
-          emptyDescription={
-            filtered
-              ? 'Clear the track or program filter, or create a template for this batch.'
-              : 'Create a template, then assign it to a program or to specific interns.'
-          }
-          emptyAction={
-            <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
-              New template
-            </Button>
-          }
           skeletonRows={3}
         >
-          <Stack spacing={1.5}>
-            {rows.map((t) => (
-              <TemplateCard
-                key={t._id}
-                template={t}
-                programs={programList}
-                onEdit={() => openEdit(t)}
-                onAssign={() => openAssign(t)}
-                onDelete={() => setDeleting(t)}
-              />
-            ))}
-          </Stack>
+          {rows.length === 0 ? (
+            <EmptyState
+              art={filtered ? ART.empty.search : ART.empty.inbox}
+              title={filtered ? 'No templates match these filters' : 'No task templates yet'}
+              description={
+                filtered
+                  ? 'Clear the track or program filter, or create a template for this batch.'
+                  : 'Create a template, then assign it to a program or to specific interns.'
+              }
+              action={
+                <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+                  New template
+                </Button>
+              }
+            />
+          ) : (
+            <Stack spacing={1.5}>
+              {rows.map((t) => (
+                <TemplateCard
+                  key={t._id}
+                  template={t}
+                  programs={programList}
+                  onEdit={() => openEdit(t)}
+                  onAssign={() => openAssign(t)}
+                  onDelete={() => setDeleting(t)}
+                />
+              ))}
+            </Stack>
+          )}
         </DataState>
       </Box>
 

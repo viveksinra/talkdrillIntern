@@ -1,12 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import React, { useState } from 'react';
+import { useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
-import Chip from '@mui/material/Chip';
 import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import MuiLink from '@mui/material/Link';
@@ -22,8 +21,13 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import SaveIcon from '@mui/icons-material/Save';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { DataState, errorMessage } from '@/components/DataStates';
+import EmptyState from '@/components/EmptyState';
+import Label, { type LabelColor } from '@/components/Label';
+import MetaLine from '@/components/MetaLine';
 import ProofPreview from '@/components/ProofPreview';
-import StatusChip from '@/components/StatusChip';
+import SectionHead from '@/components/SectionHead';
+import { statusMeta } from '@/components/StatusChip';
+import { ART } from '@/lib/art';
 import { evaluateVideo, getVideoQueue, rejectVideo } from '@/lib/api/adminInternship';
 import {
   isPopulated,
@@ -70,28 +74,13 @@ function programOf(video: VideoSubmission) {
   return program as typeof program & { baselineMinLikes?: number; videoTiers?: VideoTier[] };
 }
 
-/** Quiet caption line, middot separated. */
-function MetaLine({ items }: { items: React.ReactNode[] }) {
-  const parts = items.filter(Boolean);
-  if (!parts.length) return null;
-  return (
-    <Stack
-      direction="row"
-      alignItems="center"
-      sx={{ gap: 0.75, flexWrap: 'wrap', typography: 'caption', color: 'text.secondary' }}
-    >
-      {parts.map((part, i) => (
-        <React.Fragment key={i}>
-          {i > 0 && (
-            <Box component="span" sx={{ color: 'text.disabled' }}>
-              ·
-            </Box>
-          )}
-          {part}
-        </React.Fragment>
-      ))}
-    </Stack>
-  );
+/** "2026-08" → "Aug 2026". Left as-is if it is not a period string. */
+function fmtPeriod(period?: string | null): string | null {
+  if (!period) return null;
+  const m = /^(\d{4})-(\d{2})$/.exec(period);
+  if (!m) return period;
+  const date = new Date(Number(m[1]), Number(m[2]) - 1, 1);
+  return date.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
 }
 
 /**
@@ -216,27 +205,28 @@ function VideoCard({
             </MuiLink>
           </Box>
           <Stack direction="row" spacing={0.75} alignItems="center" sx={{ flexShrink: 0 }}>
-            <Chip size="small" variant="outlined" label={titleCase(video.platform)} />
-            <StatusChip status={video.status} />
+            <Label variant="outlined">{titleCase(video.platform)}</Label>
+            <Label color={(statusMeta(video.status).color ?? 'default') as LabelColor}>
+              {statusMeta(video.status).label}
+            </Label>
           </Stack>
         </Stack>
 
-        <Box sx={{ mt: 1.25 }}>
-          <MetaLine
-            items={[
-              `Posted ${fmtDate(video.postedAt)}`,
-              ready ? (
-                <Box component="span" sx={{ color: 'warning.dark', fontWeight: 700 }}>
-                  Due {fmtDate(video.evaluationDueAt)}
-                </Box>
-              ) : (
-                `Due ${fmtDate(video.evaluationDueAt)}`
-              ),
-              video.period,
-              program?.name,
-            ]}
-          />
-        </Box>
+        <MetaLine
+          sx={{ mt: 1.25, rowGap: 0.5 }}
+          parts={[
+            `Posted ${fmtDate(video.postedAt)}`,
+            ready ? (
+              <Box component="span" sx={{ color: 'warning.dark', fontWeight: 700 }}>
+                Due {fmtDate(video.evaluationDueAt)}
+              </Box>
+            ) : (
+              `Due ${fmtDate(video.evaluationDueAt)}`
+            ),
+            fmtPeriod(video.period),
+            program?.name,
+          ]}
+        />
 
         {video.dashboardProofUrl && (
           <Box sx={{ mt: 1.5 }}>
@@ -508,45 +498,40 @@ function VideosBody() {
       </Stack>
 
       <Box>
-        <Stack direction="row" alignItems="baseline" spacing={1} sx={{ mb: 0.5, px: 0.5 }}>
-          <Typography variant="overline" sx={{ color: 'primary.main' }}>
-            {STATUS_OPTIONS.find((o) => o.value === status)?.label ?? 'Queue'}
-          </Typography>
-          <Typography
-            className="tnum"
-            variant="caption"
-            sx={{ color: 'text.disabled', fontWeight: 600 }}
-          >
-            {fmtNumber(rows.length)}
-          </Typography>
-        </Stack>
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5, px: 0.5 }}>
-          Work top to bottom. A video locks exactly one tier and can never be re-evaluated.
-        </Typography>
+        <SectionHead
+          label={STATUS_OPTIONS.find((o) => o.value === status)?.label ?? 'Queue'}
+          count={rows.length}
+          caption="Work top to bottom. A video locks exactly one tier and can never be re-evaluated."
+        />
 
         <DataState
           loading={queue.loading && !queue.data}
           error={queue.error && !queue.data ? queue.error : undefined}
           onRetry={queue.reload}
-          isEmpty={!rows.length}
-          emptyTitle="Nothing to evaluate"
-          emptyDescription="Videos appear here once their 30-day window closes."
           skeletonRows={2}
         >
-          {/* A queue is sequential work, so it stays one full-width column. */}
-          <Stack spacing={2}>
-            {rows.map((video) => (
-              <VideoCard
-                key={video._id}
-                video={video}
-                draft={draftFor(video._id)}
-                onDraft={(next) => setDrafts((cur) => ({ ...cur, [video._id]: next }))}
-                onEvaluate={() => setConfirming(video)}
-                onReject={() => setRejecting(video)}
-                busy={busyId === video._id}
-              />
-            ))}
-          </Stack>
+          {rows.length === 0 ? (
+            <EmptyState
+              art={ART.empty.videos}
+              title="Nothing to evaluate"
+              description="Videos appear here once their 30-day window closes."
+            />
+          ) : (
+            // A queue is sequential work, so it stays one full-width column.
+            <Stack spacing={2}>
+              {rows.map((video) => (
+                <VideoCard
+                  key={video._id}
+                  video={video}
+                  draft={draftFor(video._id)}
+                  onDraft={(next) => setDrafts((cur) => ({ ...cur, [video._id]: next }))}
+                  onEvaluate={() => setConfirming(video)}
+                  onReject={() => setRejecting(video)}
+                  busy={busyId === video._id}
+                />
+              ))}
+            </Stack>
+          )}
         </DataState>
       </Box>
 
