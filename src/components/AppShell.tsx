@@ -25,9 +25,11 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import { alpha } from '@mui/material/styles';
 import AssignmentTurnedInIcon from '@mui/icons-material/AssignmentTurnedIn';
+import CampaignIcon from '@mui/icons-material/Campaign';
 import CardGiftcardIcon from '@mui/icons-material/CardGiftcard';
 import FactCheckIcon from '@mui/icons-material/FactCheck';
 import GroupIcon from '@mui/icons-material/Group';
+import HowToRegIcon from '@mui/icons-material/HowToReg';
 import LeaderboardIcon from '@mui/icons-material/Leaderboard';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import LogoutIcon from '@mui/icons-material/Logout';
@@ -83,6 +85,8 @@ export const INTERN_NAV: NavItem[] = [
 export const ADMIN_NAV: NavItem[] = [
   { key: 'dashboard', label: 'Dashboard', href: '/admin', icon: <SpaceDashboardIcon /> },
   { key: 'verify', label: 'Verify', href: '/admin/verify', icon: <FactCheckIcon /> },
+  { key: 'openings', label: 'Openings', href: '/admin/openings', icon: <CampaignIcon /> },
+  { key: 'applications', label: 'Applicants', href: '/admin/applications', icon: <HowToRegIcon /> },
   { key: 'interns', label: 'Interns', href: '/admin/interns', icon: <GroupIcon /> },
   { key: 'tasks', label: 'Tasks', href: '/admin/tasks', icon: <AssignmentTurnedInIcon /> },
   { key: 'programs', label: 'Programs', href: '/admin/programs', icon: <SchoolIcon /> },

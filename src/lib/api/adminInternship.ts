@@ -31,6 +31,9 @@ import type {
   VideoSubmissionStatus,
   EligibilityState,
 } from './types';
+// Public-hiring shapes live in ./openings (the public pages read them too) — the
+// admin side reuses them rather than re-declaring a second Opening type.
+import type { Opening } from './openings';
 
 /**
  * Admin internship API (backend: routes/api/v1/admin/internship.js, whole router
@@ -477,4 +480,376 @@ export async function getDashboardSummary(
     `/admin/internship/dashboard/summary${buildQuery(params)}`
   );
   return res.myData!;
+}
+
+// ── public openings (the hiring listings) ────────────────────────────────
+
+/**
+ * The admin view of an InternshipOpening. Same document the public pages read,
+ * plus the fields only the team sees:
+ *   - `status` / `sortOrder`   — draft/published/closed and board order
+ *   - `applicationCount`       — denormalised counter, all time
+ *   - `pendingApplications`    — added by GET /openings (submitted +
+ *                                shortlisted + interviewing), i.e. the queue
+ *   - `programIds`             — programs an accepted applicant is enrolled into
+ *
+ * `isOpen` is a Mongoose *method*, so the admin list (`.lean()`) does not carry
+ * it — read `status` + `applyBy` instead. It stays optional here only because a
+ * row handed over from the public API does have it.
+ */
+export type OpeningStatus = 'draft' | 'published' | 'closed';
+export type EmploymentType = 'internship' | 'part-time' | 'full-time';
+
+export const OPENING_STATUSES: OpeningStatus[] = ['draft', 'published', 'closed'];
+export const EMPLOYMENT_TYPES: EmploymentType[] = ['internship', 'part-time', 'full-time'];
+
+export interface AdminOpening extends Omit<Opening, '_id' | 'isOpen'> {
+  _id: string;
+  status: OpeningStatus;
+  sortOrder?: number;
+  applicationCount?: number;
+  pendingApplications?: number;
+  /**
+   * People who registered interest AFTER the deadline passed — added by GET
+   * /openings. On an expired listing this, not `pendingApplications`, is the
+   * number that matters: it is the reason to run the role again.
+   */
+  waitlistCount?: number;
+  programIds?: string[];
+  isOpen?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/**
+ * Everything the editor may send. The controller patches only the keys present,
+ * so a one-key body (`{ status }`) is a safe partial update — that is what the
+ * list screen's publish toggle sends.
+ */
+export type OpeningInput = Partial<
+  Omit<
+    AdminOpening,
+    | '_id'
+    | 'isOpen'
+    | 'applicationCount'
+    | 'pendingApplications'
+    | 'waitlistCount'
+    | 'createdAt'
+    | 'updatedAt'
+  >
+>;
+
+/** Every listing, any status. Omit `status` for the whole board (max 200 rows). */
+export async function listAdminOpenings(status?: OpeningStatus): Promise<AdminOpening[]> {
+  const res = await api<{ openings: AdminOpening[]; total: number }>(
+    `/admin/internship/openings${buildQuery({ status })}`
+  );
+  return res.myData?.openings ?? [];
+}
+
+/** One opening, unwrapped — this endpoint returns the document as myData itself. */
+export async function getAdminOpening(id: string): Promise<AdminOpening> {
+  const res = await api<AdminOpening>(`/admin/internship/openings/${id}`);
+  return res.myData!;
+}
+
+export async function createOpening(body: OpeningInput): Promise<AdminOpening> {
+  const res = await api<AdminOpening>('/admin/internship/openings', { method: 'POST', body });
+  return res.myData!;
+}
+
+export async function updateOpening(id: string, body: OpeningInput): Promise<AdminOpening> {
+  const res = await api<AdminOpening>(`/admin/internship/openings/${id}`, { method: 'PUT', body });
+  return res.myData!;
+}
+
+/**
+ * Hard delete. The server refuses (400) once an opening has applications and
+ * says so in the message — surface that text rather than a generic failure.
+ */
+export async function deleteOpening(id: string): Promise<void> {
+  await api(`/admin/internship/openings/${id}`, { method: 'DELETE' });
+}
+
+// ── applications (the hiring review queue) ───────────────────────────────
+//
+// Everything below belongs to /admin/applications. Types are spelled with
+// inline `import('./openings')` so this block carries its own dependencies.
+
+/** Status the applicant sees. `withdrawn` is set by them, never by the team. */
+type ApplicationStatusWire = import('./openings').ApplicationStatus;
+
+/**
+ * The opening an application points at. GET /applications populates four fields
+ * (slug, title, category, track); GET /applications/:id populates the whole
+ * document, which is where the custom `questions` come from — the review pane
+ * needs them to label the answers.
+ */
+export interface AdminApplicationOpening {
+  _id: string;
+  slug: string;
+  title: string;
+  category?: string;
+  track?: Track | null;
+  locationType?: import('./openings').LocationType;
+  city?: string;
+  duration?: string;
+  stipend?: import('./openings').Stipend;
+  questions?: import('./openings').OpeningQuestion[];
+  status?: OpeningStatus;
+  programIds?: string[];
+}
+
+/**
+ * One application, exactly as the admin endpoints return it — the applicant
+ * snapshot taken at submit time (never re-joined from their profile, so a later
+ * edit cannot rewrite what the team reviewed) plus the team's own decision trail.
+ *
+ * `adminNotes` is internal and appears on admin routes ONLY; the applicant-facing
+ * endpoints strip it.
+ */
+export interface AdminApplication {
+  _id: string;
+  /** Populated on both admin reads; a bare id only if population ever fails. */
+  openingId: AdminApplicationOpening | string | null;
+  userId?: string;
+
+  /**
+   * `interest` means they arrived after the deadline and left their details
+   * instead of applying — the server decides this, never the client. Promoting
+   * them to a live status flips it back to `application`.
+   */
+  kind?: import('./openings').SubmissionKind;
+  /** When the team last told this waitlisted person the role was running again. */
+  contactedAt?: string | null;
+
+  fullName: string;
+  email: string;
+  phone?: string;
+  city?: string;
+  college?: string;
+  graduationYear?: number;
+
+  pitch?: string;
+  /** Keyed by the opening question's `key`. Absent when the opening asks nothing. */
+  answers?: Record<string, string> | null;
+
+  resumeUrl?: string;
+  portfolioUrl?: string;
+  socialHandles?: {
+    instagram?: string;
+    youtube?: string;
+    linkedin?: string;
+    other?: string;
+  };
+
+  availableFrom?: string | null;
+  confirmsDuration?: boolean;
+
+  status: ApplicationStatusWire;
+  /** Set the moment someone is accepted — this is the hire receipt. */
+  internProfileId?:
+    | string
+    | { _id: string; status?: InternStatus; track?: Track | null; pointsBalance?: number }
+    | null;
+
+  decidedAt?: string | null;
+  decidedBy?: string | null;
+  /** Shown to the applicant. */
+  decisionNote?: string | null;
+  /** Internal only — the applicant never sees this. */
+  adminNotes?: string | null;
+
+  source?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+/** GET /applications — page-numbered (1-based), not skip-based like the rest. */
+export interface AdminApplicationPage {
+  applications: AdminApplication[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+/** What the team may set. `withdrawn` is the applicant's to give, so it is absent. */
+export type ApplicationDecision =
+  | 'submitted'
+  | 'shortlisted'
+  | 'interviewing'
+  | 'accepted'
+  | 'rejected';
+
+export const APPLICATION_DECISIONS: ApplicationDecision[] = [
+  'submitted',
+  'shortlisted',
+  'interviewing',
+  'accepted',
+  'rejected',
+];
+
+export interface DecideApplicationBody {
+  status: ApplicationDecision;
+  /** Shown to the applicant — write it as if they are reading it, because they are. */
+  decisionNote?: string;
+  adminNotes?: string;
+  /** Accept only. Omit to inherit the opening's track; `null` to decide later. */
+  track?: Track | null;
+  /** Accept only. Omit to inherit the opening's programs. */
+  programIds?: string[];
+}
+
+/** `internProfile` is non-null only on an accept — that is the profile just created. */
+export interface DecideApplicationResult {
+  application: AdminApplication;
+  internProfile: InternProfile | null;
+}
+
+export async function listApplications(
+  params: {
+    status?: ApplicationStatusWire;
+    openingId?: string;
+    q?: string;
+    page?: number;
+    limit?: number;
+  } = {}
+): Promise<AdminApplicationPage> {
+  const res = await api<AdminApplicationPage>(
+    `/admin/internship/applications${buildQuery(params)}`
+  );
+  return {
+    applications: res.myData?.applications ?? [],
+    total: res.myData?.total ?? 0,
+    page: res.myData?.page ?? params.page ?? 1,
+    limit: res.myData?.limit ?? params.limit ?? 50,
+  };
+}
+
+/** Full record: the whole opening (with its questions) and the linked profile. */
+export async function getApplication(id: string): Promise<AdminApplication> {
+  const res = await api<AdminApplication>(`/admin/internship/applications/${id}`);
+  return res.myData!;
+}
+
+/**
+ * The one write on this screen. `status: 'accepted'` is the HIRE action: the
+ * server creates (or tops up, idempotent by email) the InternProfile, links the
+ * TalkDrill account we already know, and returns it as `internProfile`.
+ */
+export async function decideApplication(
+  id: string,
+  body: DecideApplicationBody
+): Promise<DecideApplicationResult> {
+  const res = await api<DecideApplicationResult>(
+    `/admin/internship/applications/${id}/decide`,
+    { method: 'POST', body }
+  );
+  return { application: res.myData!.application, internProfile: res.myData?.internProfile ?? null };
+}
+
+/** Narrows a possibly-unpopulated `openingId` to the document, or null. */
+export function applicationOpening(app: AdminApplication): AdminApplicationOpening | null {
+  const ref = app.openingId;
+  if (!ref || typeof ref === 'string') return null;
+  return ref;
+}
+
+/** The created/linked profile id, whether the ref came back populated or not. */
+export function applicationProfileId(app: AdminApplication): string | null {
+  const ref = app.internProfileId;
+  if (!ref) return null;
+  return typeof ref === 'string' ? ref : ref._id;
+}
+
+// ── waitlist (interest captured after a deadline passed) ─────────────────
+//
+// A listing whose applyBy has gone by no longer turns people away: they leave
+// their details and land here as `kind: 'interest'` / `status: 'waitlisted'`.
+// These three endpoints are the team's side of that promise — see who is
+// waiting, record that you mailed them, and give the role a new deadline.
+
+/** One person waiting on a reopen. A trimmed application: no answers, no links. */
+export interface WaitlistEntry {
+  _id: string;
+  fullName: string;
+  email: string;
+  phone?: string;
+  city?: string;
+  college?: string;
+  graduationYear?: number;
+  /** Optional here — an interest submission never had to write one. */
+  pitch?: string;
+  createdAt: string;
+  /** Null until someone marks them contacted. Nothing is emailed automatically. */
+  contactedAt?: string | null;
+  /** Their TalkDrill account, if the submission came from a signed-in user. */
+  userId?: string | null;
+}
+
+/**
+ * `emails` is the whole list, server-built and de-duplicated, so the "copy all"
+ * action never has to reconstruct it from the rows on screen (which may be
+ * paginated later).
+ */
+export interface WaitlistResponse {
+  waitlist: WaitlistEntry[];
+  total: number;
+  /** How many still have no contactedAt — the number the team acts on. */
+  uncontacted: number;
+  emails: string[];
+}
+
+export async function getWaitlist(openingId: string): Promise<WaitlistResponse> {
+  const res = await api<WaitlistResponse>(`/admin/internship/openings/${openingId}/waitlist`);
+  const d = res.myData;
+  return {
+    waitlist: d?.waitlist ?? [],
+    total: d?.total ?? d?.waitlist?.length ?? 0,
+    uncontacted: d?.uncontacted ?? 0,
+    emails: d?.emails ?? [],
+  };
+}
+
+/**
+ * Stamps `contactedAt`. This is bookkeeping ONLY — the backend sends no mail, so
+ * call it after you have actually written to these people. Omit `ids` to mark
+ * everyone who is not marked yet. Returns how many rows changed.
+ */
+export async function markWaitlistContacted(
+  openingId: string,
+  ids?: string[]
+): Promise<number> {
+  const res = await api<{ updated: number }>(
+    `/admin/internship/openings/${openingId}/waitlist/contacted`,
+    { method: 'POST', body: ids?.length ? { ids } : {} }
+  );
+  return res.myData?.updated ?? 0;
+}
+
+/** `applyBy` must be in the future — the server rejects a past date by message. */
+export interface ReopenOpeningBody {
+  applyBy: string;
+  startWindow?: { from?: string; to?: string };
+  postedAt?: string;
+}
+
+/** `waitlistCount` is who was waiting when it reopened — the reason to reopen. */
+export interface ReopenOpeningResult {
+  opening: AdminOpening;
+  waitlistCount: number;
+}
+
+export async function reopenOpening(
+  openingId: string,
+  body: ReopenOpeningBody
+): Promise<ReopenOpeningResult> {
+  const res = await api<ReopenOpeningResult>(
+    `/admin/internship/openings/${openingId}/reopen`,
+    { method: 'POST', body }
+  );
+  return {
+    opening: res.myData!.opening,
+    waitlistCount: res.myData?.waitlistCount ?? 0,
+  };
 }

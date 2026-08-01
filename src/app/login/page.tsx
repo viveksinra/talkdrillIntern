@@ -1,7 +1,7 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -48,6 +48,27 @@ const SELLING_POINTS = [
 const DEFAULT_OTP_LENGTH = 6;
 const RESEND_SECONDS = 30;
 const SUPPORT_EMAIL = 'support@talkdrill.com';
+
+/**
+ * `?next=` is attacker-controlled: a login page that redirects anywhere is a
+ * phishing primitive ("sign in to TalkDrill" → someone else's clone). Only a
+ * same-origin *path* is honoured, so it must start with exactly one slash —
+ * `//evil.com` is protocol-relative and `https://evil.com` is absolute, and
+ * both are dropped in favour of the normal role default.
+ */
+function safeNext(raw: string | null): string | null {
+  if (!raw) return null;
+  if (!raw.startsWith('/') || raw.startsWith('//')) return null;
+  // `/\evil.com` is normalised to a host by some browsers — treat it as absolute too.
+  if (raw.startsWith('/\\')) return null;
+  return raw;
+}
+
+/** Only the apply flow needs the extra "you can create an account" reassurance. */
+function isApplyTarget(next: string | null): boolean {
+  if (!next) return false;
+  return /(^|\/)apply(\/|$|\?|#)/.test(next);
+}
 
 /**
  * One box per digit over a single `otp` string: paste fills them all, backspace
@@ -150,9 +171,12 @@ function CodeBoxes({
   );
 }
 
-export default function LoginPage() {
+function LoginScreen() {
   const { ready, auth, login } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextPath = safeNext(searchParams.get('next'));
+  const applyIntent = isApplyTarget(nextPath);
 
   const [step, setStep] = useState<Step>('email');
   const [busy, setBusy] = useState(false);
@@ -168,8 +192,8 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!ready || !auth) return;
-    router.replace(auth.principal === 'admin' ? '/admin' : '/tasks');
-  }, [ready, auth, router]);
+    router.replace(nextPath ?? (auth.principal === 'admin' ? '/admin' : '/tasks'));
+  }, [ready, auth, router, nextPath]);
 
   useEffect(() => {
     if (resendIn <= 0) return;
@@ -208,7 +232,7 @@ export default function LoginPage() {
   const handleOtp = () =>
     run(async () => {
       login(await verifyEmailOtp(email.trim(), otp.trim()));
-      router.replace('/tasks');
+      router.replace(nextPath ?? '/tasks');
     });
 
   const handlePassword = () =>
@@ -224,7 +248,7 @@ export default function LoginPage() {
     run(async () => {
       if (!challenge) throw new Error('Please sign in again');
       login(await adminVerifyTwoFa(challenge.challengeId, otp.trim()));
-      router.replace('/admin');
+      router.replace(nextPath ?? '/admin');
     });
 
   /** Same send endpoint as step one — nothing about the flow changes. */
@@ -573,6 +597,18 @@ export default function LoginPage() {
               </CardContent>
             </Card>
 
+            {/* Applicants arriving from an opening are usually brand new — say so,
+                so the email field does not read as "members only". */}
+            {applyIntent && (
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ display: 'block', textAlign: 'center', mt: 2.5 }}
+              >
+                Sign in or create your account to apply.
+              </Typography>
+            )}
+
             <Typography
               variant="caption"
               color="text.secondary"
@@ -587,5 +623,41 @@ export default function LoginPage() {
         </Box>
       </Box>
     </Box>
+  );
+}
+
+/**
+ * `useSearchParams` opts the subtree into client-side rendering, which Next
+ * requires a Suspense boundary for. The fallback is the bare night/paper split
+ * so the fold does not flash white before the form mounts.
+ */
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <Box
+          sx={{
+            minHeight: '100dvh',
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', md: '1.05fr 1fr' },
+            bgcolor: 'background.paper',
+          }}
+        >
+          <Box
+            sx={{
+              display: { xs: 'none', md: 'block' },
+              background: NIGHT_SKY,
+              '&::before': STARFIELD,
+              '&::after': AMBER_HAIRLINE,
+              position: 'relative',
+              overflow: 'hidden',
+            }}
+          />
+          <Box sx={{ bgcolor: { xs: 'background.paper', md: 'background.default' } }} />
+        </Box>
+      }
+    >
+      <LoginScreen />
+    </Suspense>
   );
 }
