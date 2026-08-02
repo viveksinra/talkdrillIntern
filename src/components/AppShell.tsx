@@ -177,7 +177,7 @@ export default function AppShell({
   maxWidth,
   hideNav = false,
 }: AppShellProps) {
-  const { auth, logout } = useAuth();
+  const { auth, logout, viewAs, exitViewAs } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -187,7 +187,10 @@ export default function AppShell({
   );
   const [boardEnabled, setBoardEnabled] = useState(() => readNavSnapshot()?.board ?? false);
 
-  const isAdmin = auth?.principal === 'admin';
+  // While viewing as an intern, a team member must get the INTERN shell — nav,
+  // bottom bar, track filtering and all. Deriving it here means every downstream
+  // `isAdmin` check flips at once instead of each screen special-casing it.
+  const isAdmin = auth?.principal === 'admin' && !viewAs;
   const isIntern = !!auth && !isAdmin;
 
   useEffect(() => {
@@ -205,6 +208,15 @@ export default function AppShell({
       alive = false;
     };
   }, [isIntern, hideNav, track]);
+
+  const handleExitViewAs = () => {
+    // Reset the memoised track/leaderboard fetches too — they were resolved for
+    // the intern being viewed and would otherwise carry into the next session.
+    trackPromise = null;
+    leaderboardPromise = null;
+    exitViewAs();
+    router.replace('/admin/interns');
+  };
 
   const handleLogout = () => {
     trackPromise = null;
@@ -240,6 +252,35 @@ export default function AppShell({
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
       <AppBar position="sticky" elevation={0}>
+        {/* Mode strip. Deliberately a flat one-line chrome bar INSIDE the AppBar
+            (so it stays put while scrolling) — not a gradient hero with blur
+            circles, which is the look this project has ruled out for logged-in
+            surfaces. It has to be impossible to forget you are in this mode. */}
+        {viewAs && (
+          <Box
+            role="status"
+            sx={{
+              bgcolor: viewAs.isSandbox ? 'info.dark' : 'warning.dark',
+              px: { xs: 1.5, sm: 3 },
+              py: 0.5,
+            }}
+          >
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Typography variant="caption" noWrap sx={{ fontWeight: 700, flexGrow: 1, minWidth: 0 }}>
+                {viewAs.isSandbox
+                  ? `Sandbox — ${viewAs.label}. Changes here affect nobody.`
+                  : `Viewing as ${viewAs.label} — read-only`}
+              </Typography>
+              <Button
+                size="small"
+                onClick={handleExitViewAs}
+                sx={{ color: 'inherit', fontWeight: 700, minHeight: 28, py: 0, flexShrink: 0 }}
+              >
+                Exit
+              </Button>
+            </Stack>
+          </Box>
+        )}
         <Toolbar>
           {isAdmin && items.length > 0 && (
             <IconButton

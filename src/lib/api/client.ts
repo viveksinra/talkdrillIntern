@@ -1,5 +1,6 @@
 import { API_BASE_URL } from '@/config/env';
 import { clearAuth, getAuth, updateTokens } from '@/lib/auth/tokens';
+import { getViewAs, VIEW_AS_HEADER } from '@/lib/auth/viewAs';
 
 /**
  * Typed API client — ALL backend calls go through here.
@@ -80,6 +81,11 @@ export async function api<T = unknown>(
   if (auth) {
     const stored = getAuth();
     if (stored?.accessToken) headers['Authorization'] = `Bearer ${stored.accessToken}`;
+    // "View as": the admin keeps their OWN token and names the intern they want
+    // to look through. The backend ignores this header for anyone who is not a
+    // myTeam member, so sending it is inert for a normal intern session.
+    const viewAs = getViewAs();
+    if (viewAs) headers[VIEW_AS_HEADER] = viewAs.internProfileId;
   }
 
   let res: Response;

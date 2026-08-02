@@ -1,5 +1,6 @@
 import { API_BASE_URL } from '@/config/env';
 import { getAuth } from '@/lib/auth/tokens';
+import { getViewAs, VIEW_AS_HEADER } from '@/lib/auth/viewAs';
 import type { Envelope } from './client';
 import type { SubmissionFile } from './types';
 
@@ -35,6 +36,11 @@ export async function uploadProofFile(file: File): Promise<SubmissionFile> {
   const headers: Record<string, string> = {};
   const stored = getAuth();
   if (stored?.accessToken) headers['Authorization'] = `Bearer ${stored.accessToken}`;
+  // This path bypasses api(), so the view-as header has to be attached by hand
+  // too — otherwise an upload inside a sandbox session would be scoped to the
+  // admin rather than the persona and 403 on attachInternProfile.
+  const viewAs = getViewAs();
+  if (viewAs) headers[VIEW_AS_HEADER] = viewAs.internProfileId;
 
   let res: Response;
   try {

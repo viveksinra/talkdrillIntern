@@ -853,3 +853,38 @@ export async function reopenOpening(
     waitlistCount: res.myData?.waitlistCount ?? 0,
   };
 }
+
+/* ------------------------------------------------------------------ VIEW AS */
+
+/**
+ * "View as intern" — the picker. The impersonation itself is NOT an endpoint:
+ * the admin keeps their own token and adds the `X-View-As-Intern` header
+ * (attached in client.ts), which the backend honours only for team members and
+ * only for GETs unless the target is a sandbox persona.
+ */
+export interface ViewAsTargets {
+  /** false when the feature flag is off — hide the entry points entirely. */
+  enabled: boolean;
+  sandbox: AdminInternRow[];
+  interns: AdminInternRow[];
+}
+
+export async function listViewAsTargets(q?: string): Promise<ViewAsTargets> {
+  const res = await api<ViewAsTargets>(
+    `/admin/internship/view-as/targets${buildQuery({ q })}`
+  );
+  return {
+    enabled: res.myData?.enabled === true,
+    sandbox: res.myData?.sandbox ?? [],
+    interns: res.myData?.interns ?? [],
+  };
+}
+
+/** Wipes a sandbox persona's activity and re-seeds it. Destructive by design. */
+export async function resetSandbox(track?: string): Promise<AdminInternRow[]> {
+  const res = await api<AdminInternRow[]>('/admin/internship/view-as/sandbox/reset', {
+    method: 'POST',
+    body: { track },
+  });
+  return res.myData ?? [];
+}

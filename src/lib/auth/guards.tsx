@@ -29,14 +29,18 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
 
 /** Route guard: admin (team member) only. Interns get bounced to their portal. */
 export function RequireAdmin({ children }: { children: React.ReactNode }) {
-  const { ready, auth } = useAuth();
+  const { ready, auth, viewAs, exitViewAs } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
     if (!ready) return;
     if (!auth) router.replace('/login');
     else if (auth.principal !== 'admin') router.replace('/tasks');
-  }, [ready, auth, router]);
+    // Reaching any admin screen ends a view-as session, so there is only ever
+    // one active mode. Without this an admin could sit on /admin still sending
+    // the view-as header, and every intern call would answer as someone else.
+    else if (viewAs) exitViewAs();
+  }, [ready, auth, router, viewAs, exitViewAs]);
 
   if (!ready || !auth || auth.principal !== 'admin') return <CenteredSpinner />;
   return <>{children}</>;

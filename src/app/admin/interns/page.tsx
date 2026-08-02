@@ -37,6 +37,7 @@ import { statusLabel } from '@/components/StatusChip';
 import { ART } from '@/lib/art';
 import { createIntern, listInterns, listPrograms } from '@/lib/api/adminInternship';
 import type { InternStatus, Track } from '@/lib/api/types';
+import ViewAsButton from '@/components/ViewAsButton';
 import AdminScreen, { ScrollArea, useSnack } from '../_shared/AdminScreen';
 import {
   asList,
@@ -245,16 +246,29 @@ function InternsTable({ rows }: { rows: InternRow[] }) {
                   <Typography variant="caption">{fmtDate(intern.createdAt)}</Typography>
                 </TableCell>
 
-                <TableCell align="right" sx={{ width: 40 }}>
-                  <ChevronRightRoundedIcon
-                    className="td-chevron"
-                    sx={{
-                      fontSize: 20,
-                      color: 'text.disabled',
-                      transition: (t) =>
-                        t.transitions.create(['color', 'transform'], { duration: 160 }),
-                    }}
-                  />
+                {/* Shares the trailing cell with the chevron rather than adding a
+                    column, so `head` stays in step with the body. position/zIndex
+                    lift the button above the row-wide overlay link on the name
+                    cell, which would otherwise swallow the click. */}
+                <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                  <Stack
+                    direction="row"
+                    spacing={0.5}
+                    alignItems="center"
+                    justifyContent="flex-end"
+                    sx={{ position: 'relative', zIndex: 2 }}
+                  >
+                    <ViewAsButton intern={intern} variant="text" />
+                    <ChevronRightRoundedIcon
+                      className="td-chevron"
+                      sx={{
+                        fontSize: 20,
+                        color: 'text.disabled',
+                        transition: (t) =>
+                          t.transitions.create(['color', 'transform'], { duration: 160 }),
+                      }}
+                    />
+                  </Stack>
                 </TableCell>
               </TableRow>
             );

@@ -32,6 +32,8 @@ import { ART, rewardFallbackArt } from '@/lib/art';
 import { celebrate } from '@/lib/juice';
 import { FONT_DISPLAY, hoverLift } from '@/theme';
 import { RequireAuth } from '@/lib/auth/guards';
+import { useReadOnly } from '@/lib/auth/AuthContext';
+import ReadOnlyNotice from '@/components/ReadOnlyNotice';
 import { getMyPoints, getMyRedemptions, getRewards, redeemReward } from '@/lib/api/internship';
 import { isPopulated } from '@/lib/api/types';
 import type { Redemption, RewardType, RewardWithEligibility } from '@/lib/api/types';
@@ -86,6 +88,9 @@ function RewardCard({
   balance?: number;
 }) {
   const theme = useTheme();
+  // Viewing as a real intern: spending THEIR points is exactly what must not
+  // happen, so the affordance goes away rather than failing at the server.
+  const readOnly = useReadOnly();
   const redeemable = reward.unlockType === 'points_redeemable';
   const remaining = reward.stockRemaining;
   const progressPct =
@@ -205,6 +210,7 @@ function RewardCard({
               <Button
                 variant="contained"
                 size="small"
+                disabled={readOnly}
                 onClick={() => onRedeem?.(reward)}
                 sx={{ flexShrink: 0 }}
               >
@@ -432,6 +438,8 @@ function RewardsBody() {
           </Stack>
         </Card>
       )}
+
+      <ReadOnlyNotice action="Redemptions" />
 
       {!rewards.length ? (
         <EmptyState

@@ -33,6 +33,8 @@ import Reveal from '@/components/Reveal';
 import SectionHead from '@/components/SectionHead';
 import { ART } from '@/lib/art';
 import { RequireAuth } from '@/lib/auth/guards';
+import { useReadOnly } from '@/lib/auth/AuthContext';
+import ReadOnlyNotice from '@/components/ReadOnlyNotice';
 import { celebrate } from '@/lib/juice';
 import { getMe, getMyTask, submitProof, type MeResponse } from '@/lib/api/internship';
 import { FONT_DISPLAY } from '@/theme';
@@ -528,6 +530,7 @@ function SubmissionHistory({
 function TaskScreen() {
   const params = useParams<{ id: string }>();
   const taskId = params?.id ?? '';
+  const viewingReadOnly = useReadOnly();
 
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [me, setMe] = useState<MeResponse | null>(null);
@@ -569,6 +572,10 @@ function TaskScreen() {
 
   const isActive = me?.internProfile ? me.internProfile.status === 'active' : true;
   const canSubmit = task.status !== 'approved' && isActive;
+  // The form stays VISIBLE while viewing as someone — seeing the proof UI they
+  // face is half the point — but every action that would write is dead. The
+  // backend blocks these too; this just avoids a 403 after filling the form.
+  const readOnly = viewingReadOnly;
   const complete = isProofComplete(task.proofType, value);
   const steps = task.instructions ? toSteps(task.instructions) : [];
   const strip = stripFor(task, isActive, me?.internProfile?.status, task.submissions?.[0]?.submittedAt);
@@ -594,6 +601,8 @@ function TaskScreen() {
   return (
     <>
       <PageHeader title={task.title} back="/tasks" />
+
+      <ReadOnlyNotice action="Proof submissions" />
 
       <Stack spacing={2.5}>
         {celebrating ? (
@@ -694,7 +703,7 @@ function TaskScreen() {
                   proofType={task.proofType}
                   value={value}
                   onChange={setValue}
-                  disabled={submitting}
+                  disabled={submitting || readOnly}
                   hint={
                     task.requiresDashboardProof
                       ? 'This task needs a screenshot of your creator dashboard showing the numbers.'
@@ -716,7 +725,7 @@ function TaskScreen() {
                     size="large"
                     variant="contained"
                     sx={{ mt: 2 }}
-                    disabled={!complete || submitting}
+                    disabled={!complete || submitting || readOnly}
                     onClick={submit}
                   >
                     {submitting ? 'Sending…' : (CTA_LABEL[task.status] ?? 'Submit proof')}
@@ -779,7 +788,7 @@ function TaskScreen() {
           <Button
             size="large"
             variant="contained"
-            disabled={!complete || submitting}
+            disabled={!complete || submitting || readOnly}
             onClick={submit}
             sx={{ flexShrink: 0 }}
           >

@@ -62,6 +62,7 @@ import {
   type VideoSubmission,
 } from '@/lib/api/types';
 import AdminScreen, { useSnack } from '../../_shared/AdminScreen';
+import ViewAsButton from '@/components/ViewAsButton';
 import {
   asList,
   fmtDate,
@@ -697,6 +698,7 @@ function InternDetailBody({ internId }: { internId: string }) {
           <Button size="small" startIcon={<EditIcon />} onClick={openEdit}>
             Edit profile
           </Button>
+          <ViewAsButton intern={d.profile} />
           <Box sx={{ flexGrow: 1 }} />
           <Button
             size="small"

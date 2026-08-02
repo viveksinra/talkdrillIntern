@@ -40,6 +40,8 @@ import StatCard from '@/components/StatCard';
 import { statusLabel } from '@/components/StatusChip';
 import { isValidUrl, normalizeUrl } from '@/components/ProofUploader';
 import { RequireAuth } from '@/lib/auth/guards';
+import { useReadOnly } from '@/lib/auth/AuthContext';
+import ReadOnlyNotice from '@/components/ReadOnlyNotice';
 import { ART, videoPlaceholderArt, youtubeThumbnail } from '@/lib/art';
 import { celebrate, celebrateOnce } from '@/lib/juice';
 import { customShadows, FONT_DISPLAY, gradientTokens } from '@/theme';
@@ -825,6 +827,7 @@ function VideoTotals({ videos }: { videos: MyVideo[] }) {
 }
 
 function VideosScreen() {
+  const readOnly = useReadOnly();
   const [me, setMe] = useState<MeResponse | null>(null);
   const [videos, setVideos] = useState<MyVideo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -868,7 +871,13 @@ function VideosScreen() {
     celebrateOnce(`video-tier-${won._id}`);
   }, [videos]);
 
-  const canLog = !!profile && profile.track === 'content' && profile.status === 'active';
+  // readOnly folds into the one gate the whole video flow already keys off, so
+  // the "Log a video" trigger and the dialog's fields both go inert together.
+  // Posting a video on someone's behalf would burn that URL for them permanently
+  // (the duplicate check refuses a later genuine submission) and start a 30-day
+  // cash-tier clock they never asked for.
+  const canLog =
+    !!profile && profile.track === 'content' && profile.status === 'active' && !readOnly;
 
   const header = (
     <PageHeader
@@ -954,6 +963,8 @@ function VideosScreen() {
             {notice}
           </Alert>
         )}
+
+        <ReadOnlyNotice action="Video submissions" />
 
         <Box>
           <SectionHead

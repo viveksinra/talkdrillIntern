@@ -42,6 +42,7 @@ import CountUp from '@/components/CountUp';
 import Label from '@/components/Label';
 import Reveal from '@/components/Reveal';
 import SectionHead from '@/components/SectionHead';
+import SandboxPanel from '@/components/SandboxPanel';
 import StatCard from '@/components/StatCard';
 import { ART } from '@/lib/art';
 import { getDashboardSummary, listPrograms } from '@/lib/api/adminInternship';
@@ -546,6 +547,9 @@ function DashboardBody() {
           </Card>
         </>
       )}
+
+      {/* Self-hiding: renders nothing until the backend says the view-as flag is on. */}
+      <SandboxPanel />
 
       {/* The nav already carries these twice — this is a keyboard-friendly shortcut row. */}
       <Stack

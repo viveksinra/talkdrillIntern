@@ -26,6 +26,8 @@ import Label from '@/components/Label';
 import Reveal from '@/components/Reveal';
 import SectionHead from '@/components/SectionHead';
 import { RequireAuth } from '@/lib/auth/guards';
+import { useReadOnly } from '@/lib/auth/AuthContext';
+import ReadOnlyNotice from '@/components/ReadOnlyNotice';
 import { ART } from '@/lib/art';
 import { celebrate, haptic } from '@/lib/juice';
 import { getMe, updateMyProfile, type MeResponse } from '@/lib/api/internship';
@@ -194,6 +196,7 @@ function TrackCard({
 }
 
 function OnboardingWizard({ me, onSaved }: { me: MeResponse; onSaved: (m: MeResponse) => void }) {
+  const readOnly = useReadOnly();
   const router = useRouter();
   const profile = me.internProfile!;
   // The track is a one-way choice on the backend — once set, the team owns changes.
@@ -254,7 +257,10 @@ function OnboardingWizard({ me, onSaved }: { me: MeResponse; onSaved: (m: MeResp
     }
   };
 
-  const canSubmit = accepted && (trackLocked || Boolean(track)) && !saving;
+  // Never on someone else's behalf: this writes `track`, which is ONE-WAY once
+  // set, and stamps onboardingAccepted — an acceptance record that would then
+  // falsely read as theirs.
+  const canSubmit = accepted && (trackLocked || Boolean(track)) && !saving && !readOnly;
   // Same gates as before, just checked at the step that owns them.
   const stepValid = [true, trackLocked || Boolean(track), accepted][step];
 
@@ -266,6 +272,7 @@ function OnboardingWizard({ me, onSaved }: { me: MeResponse; onSaved: (m: MeResp
 
   return (
     <Box sx={{ maxWidth: 720, mx: 'auto' }}>
+      <ReadOnlyNotice action="Onboarding changes" />
       <StepDots step={step} total={3} />
       <Typography
         variant="caption"
