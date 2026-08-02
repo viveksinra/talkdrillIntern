@@ -37,6 +37,7 @@ import { statusLabel } from '@/components/StatusChip';
 import { ART } from '@/lib/art';
 import { createIntern, listInterns, listPrograms } from '@/lib/api/adminInternship';
 import type { InternStatus, Track } from '@/lib/api/types';
+import EnrollmentChips from '@/components/EnrollmentChips';
 import ViewAsButton from '@/components/ViewAsButton';
 import AdminScreen, { ScrollArea, useSnack } from '../_shared/AdminScreen';
 import {
@@ -348,6 +349,13 @@ function InternCard({ intern, index }: { intern: InternRow; index: number }) {
               )}
               {pending > 0 && <ToReviewLink count={pending} />}
             </Stack>
+
+            {/* Which internship and which batch — a person can be on several. */}
+            {intern.enrollments?.length ? (
+              <Box sx={{ mt: 1 }}>
+                <EnrollmentChips enrollments={intern.enrollments} />
+              </Box>
+            ) : null}
 
             <MetaLine
               sx={{ mt: 1 }}

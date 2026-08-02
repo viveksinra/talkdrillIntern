@@ -9,6 +9,7 @@ import type {
   EligibilityRuleInput,
   EligibilityStatus,
   EnrollResult,
+  InternEnrollment,
   InternProfile,
   InternStatus,
   LedgerEntry,
@@ -167,6 +168,8 @@ export async function createAssignments(body: {
 /** GET /interns also decorates each row with its pending-review count. */
 export interface AdminInternRow extends InternProfile {
   pendingSubmissions?: number;
+  /** Which internship + batch each person is on. Several at once is normal. */
+  enrollments?: InternEnrollment[];
 }
 
 export async function listInterns(

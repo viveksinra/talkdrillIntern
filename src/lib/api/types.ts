@@ -623,8 +623,26 @@ export interface BulkApproveResult {
 }
 
 /** GET /admin/internship/interns/:id — profile plus everything hanging off it. */
+/**
+ * One person's participation in one batch. A student can hold several at once —
+ * a completed Campus batch and an active Content one — which is exactly why
+ * track and status live here rather than on the profile.
+ */
+export interface InternEnrollment {
+  _id: string;
+  /** The role, e.g. "Campus Ambassador". */
+  openingTitle?: string | null;
+  /** The batch, e.g. "Campus Ambassador — Batch 2". */
+  programName?: string | null;
+  batchNumber?: number | null;
+  track?: Track | null;
+  status: InternStatus;
+}
+
 export interface AdminInternDetail {
   profile: InternProfile;
+  /** Which internships and which batch of each. */
+  enrollments?: InternEnrollment[];
   tasks: AssignedTask[];
   points: PointsSummary;
   eligibility: EligibilityStatus[];

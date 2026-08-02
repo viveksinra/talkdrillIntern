@@ -53,6 +53,7 @@ import {
   type AssignedTask,
   type EligibilityProgress,
   type EligibilityState,
+  type InternEnrollment,
   type InternProfile,
   type InternStatus,
   type LedgerEntry,
@@ -62,6 +63,7 @@ import {
   type VideoSubmission,
 } from '@/lib/api/types';
 import AdminScreen, { useSnack } from '../../_shared/AdminScreen';
+import EnrollmentChips from '@/components/EnrollmentChips';
 import ViewAsButton from '@/components/ViewAsButton';
 import {
   asList,
@@ -84,6 +86,8 @@ const STATUSES: InternStatus[] = ['invited', 'active', 'paused', 'completed', 'r
 
 interface InternDetail {
   profile: InternProfile;
+  /** Which internships and which batch of each — several at once is normal. */
+  enrollments?: InternEnrollment[];
   tasks: AssignedTask[];
   points: { balance: number; totalEarned: number; entries: LedgerEntry[]; total: number };
   eligibility: unknown[];
@@ -660,6 +664,12 @@ function InternDetailBody({ internId }: { internId: string }) {
                 </Label>
               )}
             </Stack>
+            {/* The internships and batches this student is on. The status/track
+                chips above are the profile-level summary, which cannot express
+                "finished Campus batch 1, active in Content batch 2". */}
+            <Box sx={{ mt: 1 }}>
+              <EnrollmentChips enrollments={d.enrollments} />
+            </Box>
             <MetaLine
               sx={{ mt: 1 }}
               parts={[
