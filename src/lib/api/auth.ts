@@ -84,21 +84,27 @@ export interface TwoFaChallenge {
   maskedEmail: string;
   expiresInSeconds: number;
   retryAfterSeconds: number;
+  /** Digits in the emailed code. Same rule as the intern OTP — never hardcode it. */
+  otpLength: number;
 }
 
 export async function adminPasswordLogin(
   emu: string,
   password: string
 ): Promise<TwoFaChallenge> {
-  const res = await api<TwoFaChallenge & { status: string }>('/admin/passwordAuth/forTeam', {
-    method: 'POST',
-    body: { emu, password },
-    auth: false,
-  });
+  const res = await api<Omit<TwoFaChallenge, 'otpLength'> & { status: string; otpLength?: number }>(
+    '/admin/passwordAuth/forTeam',
+    { method: 'POST', body: { emu, password }, auth: false }
+  );
   if (res.myData?.status !== 'twofa_required' || !res.myData?.challengeId) {
     throw new Error(res.message || 'Unexpected login response');
   }
-  return res.myData;
+  const len = Number(res.myData.otpLength);
+  return {
+    ...res.myData,
+    // Backends that predate the `otpLength` field still send 4-digit 2FA codes.
+    otpLength: Number.isFinite(len) && len >= 4 && len <= 8 ? len : 4,
+  };
 }
 
 interface TwoFaVerifyResponse {

@@ -284,18 +284,18 @@ function LoginScreen() {
     }
   }, [step]);
 
-  const requiredCodeLength = step === 'twofa' ? DEFAULT_OTP_LENGTH : otpLength;
+  // Both flows report their own digit count — staff 2FA on the challenge,
+  // interns on send-email-otp. Assuming a length here disables the submit
+  // button forever whenever the guess is longer than the emailed code.
+  const codeLength = step === 'twofa' ? challenge?.otpLength ?? DEFAULT_OTP_LENGTH : otpLength;
 
   const submitCode = useCallback(() => {
-    if (otp.trim().length < requiredCodeLength) return;
+    if (otp.trim().length < codeLength) return;
     if (step === 'otp') handleOtp();
     else handleTwoFa();
     // handleOtp/handleTwoFa are stable enough for this callback's purpose.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [otp, step, requiredCodeLength]);
-
-  // Admin 2FA codes are always 6; intern OTP length is whatever send-email-otp said.
-  const codeLength = step === 'twofa' ? DEFAULT_OTP_LENGTH : otpLength;
+  }, [otp, step, codeLength]);
 
   const codeField = (
     <CodeBoxes
@@ -517,7 +517,7 @@ function LoginScreen() {
                           <Button
                             variant="contained"
                             size="large"
-                            disabled={busy || otp.trim().length < requiredCodeLength}
+                            disabled={busy || otp.trim().length < codeLength}
                             onClick={handleOtp}
                           >
                             {busy ? 'Verifying…' : 'Sign in'}
@@ -572,7 +572,7 @@ function LoginScreen() {
                           <Button
                             variant="contained"
                             size="large"
-                            disabled={busy || otp.trim().length < requiredCodeLength}
+                            disabled={busy || otp.trim().length < codeLength}
                             onClick={handleTwoFa}
                           >
                             {busy ? 'Verifying…' : 'Sign in'}
