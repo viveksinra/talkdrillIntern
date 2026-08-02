@@ -854,6 +854,53 @@ export async function reopenOpening(
   };
 }
 
+/* ------------------------------------------------------------------ BATCHES */
+
+/**
+ * Start a NEW cohort for a role.
+ *
+ * Distinct from `reopenOpening`, which only moves the CURRENT batch's deadline.
+ * This creates the next `InternshipProgram`, points the opening at it, and
+ * clears `contactedAt` on the waitlist so "who still needs mailing" is
+ * meaningful again.
+ *
+ * The reason it matters: application uniqueness is (opening, user, batch), so
+ * once a new batch exists everyone who applied to a previous one — including
+ * the rejected pool a second round recruits from — can apply again, with batch
+ * 1's decisions left intact.
+ */
+export interface StartNextBatchBody {
+  /** Must be in the future — the server rejects a past date by message. */
+  applyBy: string;
+  /** Defaults to "Batch N" server-side. */
+  batchLabel?: string;
+  seats?: number;
+  startWindow?: { from?: string; to?: string };
+  postedAt?: string;
+}
+
+export interface StartNextBatchResult {
+  opening: AdminOpening;
+  program: { _id: string; name: string; slug: string; batchNumber: number };
+  /** Waitlisted people reset to un-contacted — i.e. who to mail about this round. */
+  waitlistCount: number;
+}
+
+export async function startNextBatch(
+  openingId: string,
+  body: StartNextBatchBody
+): Promise<StartNextBatchResult> {
+  const res = await api<StartNextBatchResult>(
+    `/admin/internship/openings/${openingId}/next-batch`,
+    { method: 'POST', body }
+  );
+  return {
+    opening: res.myData!.opening,
+    program: res.myData!.program,
+    waitlistCount: res.myData?.waitlistCount ?? 0,
+  };
+}
+
 /* ------------------------------------------------------------------ VIEW AS */
 
 /**

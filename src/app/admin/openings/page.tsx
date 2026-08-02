@@ -27,6 +27,7 @@ import ChevronRightRoundedIcon from '@mui/icons-material/ChevronRightRounded';
 import CloseIcon from '@mui/icons-material/Close';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import EventRepeatIcon from '@mui/icons-material/EventRepeat';
+import GroupAddOutlinedIcon from '@mui/icons-material/GroupAddOutlined';
 import MarkEmailReadOutlinedIcon from '@mui/icons-material/MarkEmailReadOutlined';
 import PeopleAltOutlinedIcon from '@mui/icons-material/PeopleAltOutlined';
 import PublicIcon from '@mui/icons-material/Public';
@@ -44,6 +45,7 @@ import {
   listAdminOpenings,
   markWaitlistContacted,
   reopenOpening,
+  startNextBatch,
   updateOpening,
   type AdminOpening,
   type OpeningStatus,
@@ -194,10 +196,37 @@ function WaitlistPill({
   );
 }
 
+/**
+ * The primary "we are hiring again" action. Sits next to Reopen because they
+ * look similar and are not: this starts a NEW cohort (past applicants may apply
+ * again), Reopen only moves the current one's deadline.
+ */
+function NextBatchButton({ opening, onOpen }: { opening: AdminOpening; onOpen: () => void }) {
+  return (
+    <Tooltip title="Start a new cohort — past applicants, including rejected ones, can apply again">
+      <Box component="span" sx={{ position: 'relative', zIndex: 2 }}>
+        <Button
+          size="small"
+          variant="contained"
+          startIcon={<GroupAddOutlinedIcon fontSize="small" />}
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            onOpen();
+          }}
+          sx={{ whiteSpace: 'nowrap' }}
+        >
+          Next batch
+        </Button>
+      </Box>
+    </Tooltip>
+  );
+}
+
 /** Offered wherever a deadline has already gone by. */
 function ReopenButton({ opening, onOpen }: { opening: AdminOpening; onOpen: () => void }) {
   return (
-    <Tooltip title="Give this listing a new last date to apply">
+    <Tooltip title="Only extend THIS batch's deadline — does not start a new cohort">
       <Box component="span" sx={{ position: 'relative', zIndex: 2 }}>
         <Button
           size="small"
@@ -309,12 +338,14 @@ function OpeningsTable({
   onToggle,
   onWaitlist,
   onReopen,
+  onNextBatch,
 }: {
   rows: AdminOpening[];
   busyId: string | null;
   onToggle: (o: AdminOpening) => void;
   onWaitlist: (o: AdminOpening) => void;
   onReopen: (o: AdminOpening) => void;
+  onNextBatch: (o: AdminOpening) => void;
 }) {
   const head = ['Opening', 'Status', 'Track', 'Apply by', 'Seats', 'Applications'];
 
@@ -401,6 +432,7 @@ function OpeningsTable({
 
                 <TableCell align="right" sx={{ width: 240 }}>
                   <Stack direction="row" spacing={0.75} justifyContent="flex-end">
+                    {canReopen(o) && <NextBatchButton opening={o} onOpen={() => onNextBatch(o)} />}
                     {canReopen(o) && <ReopenButton opening={o} onOpen={() => onReopen(o)} />}
                     <PublishButton
                       opening={o}
@@ -438,6 +470,7 @@ function OpeningRowCard({
   onToggle,
   onWaitlist,
   onReopen,
+  onNextBatch,
 }: {
   opening: AdminOpening;
   index: number;
@@ -445,6 +478,7 @@ function OpeningRowCard({
   onToggle: () => void;
   onWaitlist: () => void;
   onReopen: () => void;
+  onNextBatch: () => void;
 }) {
   const pending = opening.pendingApplications ?? 0;
 
@@ -493,6 +527,7 @@ function OpeningRowCard({
           {pending > 0 && <PendingLink openingId={opening._id} count={pending} />}
           <WaitlistPill opening={opening} onOpen={onWaitlist} />
           <Box sx={{ flexGrow: 1 }} />
+          {canReopen(opening) && <NextBatchButton opening={opening} onOpen={onNextBatch} />}
           {canReopen(opening) && <ReopenButton opening={opening} onOpen={onReopen} />}
           <PublishButton opening={opening} busy={busy} onToggle={onToggle} />
         </Stack>
@@ -559,6 +594,88 @@ function ReopenDialog({
           site — publish it too.
         </Alert>
       )}
+    </ConfirmDialog>
+  );
+}
+
+/**
+ * Start the next cohort. Deliberately separate from Reopen: Reopen fixes the
+ * CURRENT batch's deadline, this begins a new one.
+ *
+ * The difference is not cosmetic. Applications are unique per (opening, person,
+ * batch), so only a new batch lets a previous applicant apply again — including
+ * everyone rejected last round, which is normally where round 2 recruits from.
+ */
+function NextBatchDialog({
+  opening,
+  onClose,
+  onDone,
+}: {
+  opening: AdminOpening;
+  onClose: () => void;
+  onDone: (result: { label: string; waitlistCount: number }) => void;
+}) {
+  const [date, setDate] = useState('');
+  const [label, setLabel] = useState('');
+  const [seats, setSeats] = useState('');
+  const waiting = opening.waitlistCount ?? 0;
+  const today = new Date().toLocaleDateString('en-CA');
+
+  return (
+    <ConfirmDialog
+      open
+      title={`Start the next batch of “${opening.title}”?`}
+      message="Creates a new cohort and reopens applications for it. Everyone who applied to an earlier batch — including anyone you rejected — can apply again, and their old application stays on file."
+      confirmLabel="Start batch"
+      onClose={onClose}
+      onConfirm={async () => {
+        if (!date) throw new Error('Pick the last date to apply for this batch.');
+        // End of the chosen day, so "apply by the 20th" includes the 20th — and
+        // so picking today still counts as future, which the server requires.
+        const applyBy = new Date(`${date}T23:59:59`).toISOString();
+        const seatCount = Number(seats);
+        const result = await startNextBatch(opening._id, {
+          applyBy,
+          batchLabel: label.trim() || undefined,
+          seats: Number.isFinite(seatCount) && seatCount > 0 ? seatCount : undefined,
+        });
+        onDone({
+          label: result.program?.name ?? 'The next batch',
+          waitlistCount: result.waitlistCount,
+        });
+      }}
+    >
+      {waiting > 0 && (
+        <Alert severity="info" icon={<PeopleAltOutlinedIcon fontSize="inherit" />}>
+          {waitingSentence(waiting)} Starting a batch marks them all as not yet
+          contacted, so you can mail this round from the waitlist.
+        </Alert>
+      )}
+      <TextField
+        label="Last date to apply"
+        type="date"
+        value={date}
+        onChange={(e) => setDate(e.target.value)}
+        InputLabelProps={{ shrink: true }}
+        inputProps={{ min: today }}
+        autoFocus
+        helperText="Applications stay open until the end of this day."
+      />
+      <TextField
+        label="Batch name"
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+        placeholder="Batch 2"
+        helperText="Optional — numbered automatically if you leave it blank."
+      />
+      <TextField
+        label="Seats"
+        type="number"
+        value={seats}
+        onChange={(e) => setSeats(e.target.value)}
+        inputProps={{ min: 1 }}
+        helperText={`Optional — defaults to the listing's current ${opening.openings ?? 1}.`}
+      />
     </ConfirmDialog>
   );
 }
@@ -787,6 +904,7 @@ function OpeningsBody() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [waitlistFor, setWaitlistFor] = useState<AdminOpening | null>(null);
   const [reopenFor, setReopenFor] = useState<AdminOpening | null>(null);
+  const [nextBatchFor, setNextBatchFor] = useState<AdminOpening | null>(null);
 
   const openings = useAsync(() => listAdminOpenings(), []);
   const all = useMemo(() => openings.data ?? [], [openings.data]);
@@ -950,6 +1068,7 @@ function OpeningsBody() {
                   onToggle={togglePublish}
                   onWaitlist={setWaitlistFor}
                   onReopen={setReopenFor}
+                  onNextBatch={setNextBatchFor}
                 />
                 <Divider />
                 <Typography
@@ -972,6 +1091,7 @@ function OpeningsBody() {
                         onToggle={() => togglePublish(o)}
                         onWaitlist={() => setWaitlistFor(o)}
                         onReopen={() => setReopenFor(o)}
+                        onNextBatch={() => setNextBatchFor(o)}
                       />
                     </Grid>
                   ))}
@@ -993,6 +1113,21 @@ function OpeningsBody() {
                 : 'Reopened — it is taking applications again'
             );
             // ConfirmDialog closes itself once onConfirm resolves.
+            openings.reload();
+          }}
+        />
+      )}
+
+      {nextBatchFor && (
+        <NextBatchDialog
+          opening={nextBatchFor}
+          onClose={() => setNextBatchFor(null)}
+          onDone={({ label, waitlistCount }) => {
+            show(
+              waitlistCount > 0
+                ? `${label} is open — ${people(waitlistCount)} on the waitlist to mail`
+                : `${label} is open and taking applications`
+            );
             openings.reload();
           }}
         />

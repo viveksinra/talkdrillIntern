@@ -120,26 +120,50 @@ function platformLabelOf(platform: string): string {
  * on the list endpoint's `program` decoration — so try all three and give up
  * quietly (the whole block is skipped) when none of them carry a table.
  */
-function collectTiers(profile: InternProfile | null, videos: MyVideo[]): VideoTier[] {
-  const found: VideoTier[] = [];
-
-  const take = (tiers: VideoTier[] | undefined | null) => {
-    if (found.length || !Array.isArray(tiers) || !tiers.length) return;
-    found.push(...tiers.filter((t) => t && Number.isFinite(Number(t.minViews))));
-  };
-
-  for (const ref of profile?.programIds ?? []) {
-    if (isPopulated<Program>(ref)) take(ref.videoTiers);
-  }
-  for (const video of videos) {
-    take(video.program?.videoTiers);
-    const ref = video.programId ?? null;
-    if (isPopulated<Program>(ref)) take(ref.videoTiers);
-  }
-
-  return found
+function sortTiers(tiers: VideoTier[]): VideoTier[] {
+  return tiers
+    .filter((t) => t && Number.isFinite(Number(t.minViews)))
     .slice()
     .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.minViews ?? 0) - (b.minViews ?? 0));
+}
+
+/** The ladder a SPECIFIC video is paid against — always its own batch's. */
+function tiersForVideo(video: MyVideo): VideoTier[] {
+  if (video.program?.videoTiers?.length) return sortTiers(video.program.videoTiers);
+  const ref = video.programId ?? null;
+  if (isPopulated<Program>(ref) && ref.videoTiers?.length) return sortTiers(ref.videoTiers);
+  return [];
+}
+
+/**
+ * A ladder to show when there is no particular video in hand (the explainer at
+ * the top of the screen).
+ *
+ * Only returns one when every batch the intern is in agrees, because tiers are
+ * editable per batch: picking whichever came first — which is what this used to
+ * do — could display a ladder that disagrees with what the person is actually
+ * paid, since the tier that counts is snapshotted onto each video from its OWN
+ * batch. Showing nothing is better than showing a number we might not honour.
+ */
+function collectTiers(profile: InternProfile | null, videos: MyVideo[]): VideoTier[] {
+  const candidates: VideoTier[][] = [];
+
+  for (const ref of profile?.programIds ?? []) {
+    if (isPopulated<Program>(ref) && ref.videoTiers?.length) candidates.push(sortTiers(ref.videoTiers));
+  }
+  for (const video of videos) {
+    const tiers = tiersForVideo(video);
+    if (tiers.length) candidates.push(tiers);
+  }
+
+  if (!candidates.length) return [];
+
+  const first = JSON.stringify(candidates[0].map((t) => [t.minViews, t.cashAmount ?? 0]));
+  const allAgree = candidates.every(
+    (c) => JSON.stringify(c.map((t) => [t.minViews, t.cashAmount ?? 0])) === first
+  );
+
+  return allAgree ? candidates[0] : [];
 }
 
 /** Index of a locked tier key in the sorted ladder — drives the medallion art. */
